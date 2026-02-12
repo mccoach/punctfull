@@ -1,0 +1,153 @@
+:root {
+  --bg: #fafafa;
+  --fg: #2c2c2c;
+  --panel: #f0f0f0;
+  --border: #d0d0d0;
+
+  --editor-bg: #ffffff;
+
+  --hl-out: #ffff00;
+  --hl-in: #87ceeb;
+  --skip: #aaaaaa;
+
+  --btn-bg: #ffffff;
+  --btn-fg: #222;
+}
+
+:root[data-theme="dark"] {
+  --bg: #1a1a1a;
+  --fg: #d4d4d4;
+  --panel: #242424;
+  --border: #2a2a2a;
+
+  --editor-bg: #1e1e1e;
+
+  --hl-out: #8b7355;
+  --hl-in: #2a7da2;
+  --skip: #999999;
+
+  --btn-bg: #2a2a2a;
+  --btn-fg: #e6e6e6;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+#app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.topbar .group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+label {
+  font-size: 13px;
+}
+
+input[type="text"] {
+  width: 380px;
+  max-width: 50vw;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border-radius: 6px;
+}
+
+button {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:disabled { opacity: .6; cursor: not-allowed; }
+
+select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border-radius: 6px;
+}
+
+.status {
+  flex: 1;
+  min-width: 260px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+
+.pane:last-child {
+  border-right: none;
+}
+
+.pane .title {
+  padding: 8px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.editor {
+  flex: 1;
+  min-height: 0;
+}
+
+.footer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+/* Monaco decorations */
+.monaco-editor .punctfull-diff-out {
+  background: var(--hl-out);
+}
+.monaco-editor .punctfull-diff-in {
+  background: var(--hl-in);
+}
+.monaco-editor .punctfull-skip {
+  background: var(--skip);
+}
