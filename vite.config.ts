@@ -22,7 +22,8 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: "/punctfull/index.html",
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,ttf}"]
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,ttf,webmanifest}"],
+        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024
       }
     })
   ],
