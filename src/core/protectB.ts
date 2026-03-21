@@ -43,8 +43,6 @@ function trimFragIfNeeded(name: string, frag: string): string {
 type ParsedMdLink = {
   start: number;
   end: number;
-  labelStart: number;
-  labelEnd: number;
   addrStart: number;
   addrEnd: number;
   isImage: boolean;
@@ -59,10 +57,9 @@ function parseMdLinkAt(text: string, start: number): ParsedMdLink | null {
     i += 1;
   }
 
-  if (text[i] !== "[") return null;
-  const labelStart = i + 1;
+  if (i >= text.length || text[i] !== "[") return null;
 
-  let j = labelStart;
+  let j = i + 1;
   while (j < text.length) {
     if (text[j] === "\\" && j + 1 < text.length) {
       j += 2;
@@ -75,11 +72,10 @@ function parseMdLinkAt(text: string, start: number): ParsedMdLink | null {
   if (j >= text.length || text[j] !== "]") return null;
   if (j + 1 >= text.length || text[j + 1] !== "(") return null;
 
-  const labelEnd = j;
   const addrStart = j + 2;
-
   let k = addrStart;
   let depth = 1;
+
   while (k < text.length) {
     const ch = text[k];
     if (ch === "\\" && k + 1 < text.length) {
@@ -93,8 +89,6 @@ function parseMdLinkAt(text: string, start: number): ParsedMdLink | null {
         return {
           start,
           end: k + 1,
-          labelStart,
-          labelEnd,
           addrStart,
           addrEnd: k,
           isImage,
@@ -114,47 +108,51 @@ function containsTokenMarker(s: string): boolean {
 function protectMarkdownLinksAndImages(text: string, stats: Stats, store: TokenStore): string {
   const out: string[] = [];
   let i = 0;
-  let last = 0;
 
   while (i < text.length) {
-    if (text[i] !== "[" && text[i] !== "!") {
+    const ch = text[i];
+
+    if (ch !== "!" && ch !== "[") {
+      out.push(ch);
       i += 1;
       continue;
     }
 
     const parsed = parseMdLinkAt(text, i);
     if (!parsed) {
+      out.push(ch);
       i += 1;
       continue;
     }
-
-    out.push(text.slice(last, parsed.start));
 
     const whole = text.slice(parsed.start, parsed.end);
     const addr = text.slice(parsed.addrStart, parsed.addrEnd);
 
     if (containsTokenMarker(whole)) {
       out.push(whole);
-    } else if (parsed.isImage) {
-      stats.protected_B_fragments += 1;
-      out.push(store.put(whole));
-    } else if (containsTokenMarker(addr)) {
-      out.push(whole);
-    } else {
-      stats.protected_B_fragments += 1;
-      const token = store.put(addr);
-      out.push(
-        text.slice(parsed.start, parsed.addrStart) +
-        token +
-        text.slice(parsed.addrEnd, parsed.end),
-      );
+      i = parsed.end;
+      continue;
     }
 
+    if (parsed.isImage) {
+      stats.protected_B_fragments += 1;
+      out.push(store.put(whole));
+      i = parsed.end;
+      continue;
+    }
+
+    if (containsTokenMarker(addr)) {
+      out.push(whole);
+      i = parsed.end;
+      continue;
+    }
+
+    stats.protected_B_fragments += 1;
+    const token = store.put(addr);
+    out.push(text.slice(parsed.start, parsed.addrStart) + token + text.slice(parsed.addrEnd, parsed.end));
     i = parsed.end;
-    last = parsed.end;
   }
 
-  out.push(text.slice(last));
   return out.join("");
 }
 

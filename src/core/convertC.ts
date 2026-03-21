@@ -28,12 +28,7 @@ export function convertC(text: string, options: Options, stats: Stats): string {
 
     let par = part;
 
-    // 1) Markdown compatibility fixes
-    if (options.fix_md_bold_symbols) {
-      par = fixMarkdownBoldSymbols(par, stats);
-    }
-
-    // 2) Pair-like structures
+    // 1) Pair-like structures
     if (options.convert_quotes) {
       const r = convertQuotesInParagraph(par, stats);
       par = r.text;
@@ -63,11 +58,17 @@ export function convertC(text: string, options: Options, stats: Stats): string {
       par = fixPairedSymbolsInParagraph(par, stats);
     }
 
-    // 3) Linear punctuation transforms
+    // 2) Linear punctuation transforms
     if (options.convert_emphasis_punct) par = convertEmphasisPunct(par, stats);
     if (options.convert_ellipsis) par = convertEllipsis(par, stats);
     if (options.convert_dash) par = convertDash(par, stats);
     if (options.convert_basic_punct) par = convertBasic(par, stats);
+
+    // 3) Markdown compatibility fixes should run last,
+    //    so they see the final punctuation shape.
+    if (options.fix_md_bold_symbols) {
+      par = fixMarkdownBoldSymbols(par, stats);
+    }
 
     out.push(par);
     outPos += par.length;
