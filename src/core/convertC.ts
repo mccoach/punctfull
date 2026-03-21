@@ -37,6 +37,21 @@ type ParsedMdLinkLike = {
   isImage: boolean;
 };
 
+const DEBUG_PF = true;
+
+function dbg(scope: string, message: string, extra?: unknown) {
+  if (!DEBUG_PF) return;
+  if (extra === undefined) {
+    console.log(`[PFDBG:${scope}] ${message}`);
+  } else {
+    console.log(`[PFDBG:${scope}] ${message}`, extra);
+  }
+}
+
+function previewText(s: string, max = 120): string {
+  return s.length <= max ? s : s.slice(0, max) + " ...(truncated)";
+}
+
 export function convertC(text: string, options: Options, stats: Stats): string {
   const parts = splitParagraphsByBlankLines(text);
   const out: string[] = [];
@@ -179,11 +194,21 @@ function splitMdInlineSegments(text: string): MdInlineSegment[] {
       out.push({ kind: "text", s: text.slice(last, parsed.start) });
     }
 
+    const label = text.slice(parsed.labelStart, parsed.labelEnd);
+    const addr = text.slice(parsed.addrStart, parsed.addrEnd);
+
+    dbg("LINK", "splitMdInlineSegments detected mdlink/image", {
+      isImage: parsed.isImage,
+      raw: text.slice(parsed.start, parsed.end),
+      label,
+      addr,
+    });
+
     out.push({
       kind: "mdlink",
       isImage: parsed.isImage,
-      label: text.slice(parsed.labelStart, parsed.labelEnd),
-      addr: text.slice(parsed.addrStart, parsed.addrEnd),
+      label,
+      addr,
     });
 
     i = parsed.end;
@@ -211,7 +236,26 @@ function convertByMdInlineSegments(
       continue;
     }
 
+    const beforeLabel = seg.label;
     const label = convertPlain(seg.label, stats);
+
+    if (beforeLabel !== label) {
+      dbg("LINK", "label changed by convertPlain", {
+        isImage: seg.isImage,
+        before: beforeLabel,
+        after: label,
+        addr: seg.addr,
+        convertPlain: convertPlain.name || "(anonymous)",
+      });
+    } else if (/[,:;?!]|\.{3,}|--|[!?]{2,}/.test(beforeLabel)) {
+      dbg("LINK", "label passed convertPlain but unchanged", {
+        isImage: seg.isImage,
+        label: beforeLabel,
+        addr: seg.addr,
+        convertPlain: convertPlain.name || "(anonymous)",
+      });
+    }
+
     if (seg.isImage) out.push(`![${label}](${seg.addr})`);
     else out.push(`[${label}](${seg.addr})`);
   }
@@ -243,12 +287,20 @@ function trimBoldInner(inner: string, stats: Stats): string {
 
   const leftTrimmed = out.replace(/^[ \t]+/, "");
   if (leftTrimmed !== out) {
+    dbg("BOLD", "trim left inner spaces", {
+      before: inner,
+      after: leftTrimmed,
+    });
     out = leftTrimmed;
     inc(stats, "md_bold_symbol_fix", 1);
   }
 
   const rightTrimmed = out.replace(/[ \t]+$/, "");
   if (rightTrimmed !== out) {
+    dbg("BOLD", "trim right inner spaces", {
+      before: out,
+      after: rightTrimmed,
+    });
     out = rightTrimmed;
     inc(stats, "md_bold_symbol_fix", 1);
   }
@@ -271,6 +323,21 @@ function normalizeBoldPair(pair: BoldPair, stats: Stats): { leftPad: string; cor
     isNonWordLikeForBold(lastInner) &&
     !isNonWordLikeForBold(pair.rightOuter);
 
+  dbg("BOLD", "normalizeBoldPair decision", {
+    pair,
+    trimmedInner: inner,
+    firstInner,
+    lastInner,
+    leftOuter: pair.leftOuter,
+    rightOuter: pair.rightOuter,
+    leftOuterIsNonWord: isNonWordLikeForBold(pair.leftOuter),
+    rightOuterIsNonWord: isNonWordLikeForBold(pair.rightOuter),
+    firstInnerIsNonWord: isNonWordLikeForBold(firstInner),
+    lastInnerIsNonWord: isNonWordLikeForBold(lastInner),
+    needLeftPad,
+    needRightPad,
+  });
+
   if (needLeftPad) inc(stats, "md_bold_symbol_fix", 1);
   if (needRightPad) inc(stats, "md_bold_symbol_fix", 1);
 
@@ -286,6 +353,8 @@ function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
 
   const out: string[] = [];
   let cursor = 0;
+
+  dbg("BOLD", "start paragraph", { paragraph: previewText(par, 240) });
 
   while (cursor < par.length) {
     const open = par.indexOf("**", cursor);
@@ -307,7 +376,27 @@ function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
       rightOuter: close + 2 < par.length ? par[close + 2] : "",
     };
 
+    dbg("BOLD", "found bold pair", {
+      cursor,
+      open,
+      close,
+      beforeTail: before.slice(Math.max(0, before.length - 20)),
+      leftOuter: pair.leftOuter,
+      inner: pair.inner,
+      rightOuter: pair.rightOuter,
+      raw: par.slice(open, close + 2),
+    });
+
     const normalized = normalizeBoldPair(pair, stats);
+
+    dbg("BOLD", "apply normalized result", {
+      raw: par.slice(open, close + 2),
+      result: normalized.leftPad + normalized.core + normalized.rightPad,
+      leftPad: normalized.leftPad,
+      core: normalized.core,
+      rightPad: normalized.rightPad,
+    });
+
     out.push(before);
     out.push(normalized.leftPad);
     out.push(normalized.core);
@@ -316,7 +405,19 @@ function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
     cursor = close + 2;
   }
 
-  return out.join("");
+  const result = out.join("");
+  if (result !== par) {
+    dbg("BOLD", "paragraph changed", {
+      before: previewText(par, 240),
+      after: previewText(result, 240),
+    });
+  } else {
+    dbg("BOLD", "paragraph unchanged", {
+      paragraph: previewText(par, 240),
+    });
+  }
+
+  return result;
 }
 
 /** ---------- Parens semantic ---------- */
@@ -638,10 +739,17 @@ function convertEmphasisPunctPlain(text: string, stats: Stats): string {
     const out = convertEmphasisRun(m);
     if (out === m) return m;
 
-    if (/!{3,}/.test(m)) inc(stats, "exclaim_runs", 1);
+    if (/\!{3,}/.test(m)) inc(stats, "exclaim_runs", 1);
     if (/\?{3,}/.test(m)) inc(stats, "question_runs", 1);
     if (m.includes("?!")) inc(stats, "?!", 1);
     if (m.includes("!?")) inc(stats, "!?", 1);
+
+    dbg("LINK", "convertEmphasisPunctPlain replaced run", {
+      before: m,
+      after: out,
+      offset: Number(offset),
+      textPreview: previewText(text, 160),
+    });
 
     return out;
   });
@@ -703,6 +811,15 @@ function convertBasicPlain(text: string, stats: Stats): string {
 
       inc(stats, `${ch}->${mapped}`, 1);
       out += mapped;
+    }
+
+    if (m !== out) {
+      dbg("LINK", "convertBasicPlain replaced run", {
+        before: m,
+        after: out,
+        offset: base,
+        textPreview: previewText(text, 160),
+      });
     }
 
     return out;

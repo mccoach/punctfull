@@ -5,6 +5,17 @@ import { hasAnyTokenInRange } from "./tokenUtils";
 const TRIM_CHARS = `.,;:!?)}]>\'"”’，。；：？！】）》）`;
 const TRIM_RE = new RegExp(`[${escapeForCharClass(TRIM_CHARS)}]+$`);
 
+const DEBUG_PF = true;
+
+function dbg(scope: string, message: string, extra?: unknown) {
+  if (!DEBUG_PF) return;
+  if (extra === undefined) {
+    console.log(`[PFDBG:${scope}] ${message}`);
+  } else {
+    console.log(`[PFDBG:${scope}] ${message}`, extra);
+  }
+}
+
 function escapeForCharClass(s: string) {
   return s.replace(/[-\\\]^]/g, "\\$&");
 }
@@ -133,13 +144,24 @@ function protectMarkdownLinksAndImages(text: string, stats: Stats, store: TokenS
     const label = text.slice(parsed.labelStart, parsed.labelEnd);
     const addr = text.slice(parsed.addrStart, parsed.addrEnd);
 
+    dbg("IMG", "detected markdown link/image", {
+      isImage: parsed.isImage,
+      whole,
+      label,
+      addr,
+      start: parsed.start,
+      end: parsed.end,
+    });
+
     if (containsTokenMarker(whole)) {
+      dbg("IMG", "skip protection because whole contains token marker", { whole });
       out.push(whole);
       i = parsed.end;
       continue;
     }
 
     if (containsTokenMarker(addr)) {
+      dbg("IMG", "skip protection because addr contains token marker", { whole, addr });
       out.push(whole);
       i = parsed.end;
       continue;
@@ -147,6 +169,16 @@ function protectMarkdownLinksAndImages(text: string, stats: Stats, store: TokenS
 
     stats.protected_B_fragments += 1;
     const addrToken = store.put(addr);
+
+    dbg("IMG", "protected only addr, structural chars remain in text", {
+      isImage: parsed.isImage,
+      wholeBefore: whole,
+      wholeAfter: parsed.isImage
+        ? "![" + label + "](" + addrToken + ")"
+        : "[" + label + "](" + addrToken + ")",
+      protectedPart: addr,
+      token: addrToken,
+    });
 
     if (parsed.isImage) {
       out.push("![" + label + "](" + addrToken + ")");
@@ -226,6 +258,13 @@ function protectCommonTechnicalFragments(text: string, stats: Stats, store: Toke
 
       if (!isPatternMatchAllowed(name, text, s, e, frag)) continue;
 
+      dbg("IMG", "protectCommonTechnicalFragments match", {
+        name,
+        frag,
+        start: s,
+        end: e,
+      });
+
       parts.push(text.slice(last, s));
       parts.push(store.put(frag));
       stats.protected_B_fragments += 1;
@@ -243,8 +282,16 @@ export function protectB(text: string, stats: Stats): { text: string; store: Tok
   const store = new TokenStore("B");
   if (!text) return { text, store };
 
+  dbg("IMG", "protectB start", { length: text.length });
+
   text = protectMarkdownLinksAndImages(text, stats, store);
   text = protectCommonTechnicalFragments(text, stats, store);
+
+  dbg("IMG", "protectB end", {
+    length: text.length,
+    protected_B_fragments: stats.protected_B_fragments,
+    tokenCount: store.items.length,
+  });
 
   return { text, store };
 }
