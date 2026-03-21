@@ -20,7 +20,8 @@ type SegPart = { kind: "text"; s: string } | { kind: "token"; s: string };
 
 type MdInlineSegment =
   | { kind: "text"; s: string }
-  | { kind: "mdlink"; isImage: boolean; label: string; addr: string };
+  | { kind: "mdlink"; label: string; addr: string }
+  | { kind: "mdimage"; label: string; addr: string };
 
 type ParsedMdLinkLike = {
   start: number;
@@ -180,12 +181,14 @@ function splitMdInlineSegments(text: string): MdInlineSegment[] {
       out.push({ kind: "text", s: text.slice(last, parsed.start) });
     }
 
-    out.push({
-      kind: "mdlink",
-      isImage: parsed.isImage,
-      label: text.slice(parsed.labelStart, parsed.labelEnd),
-      addr: text.slice(parsed.addrStart, parsed.addrEnd),
-    });
+    const label = text.slice(parsed.labelStart, parsed.labelEnd);
+    const addr = text.slice(parsed.addrStart, parsed.addrEnd);
+
+    if (parsed.isImage) {
+      out.push({ kind: "mdimage", label, addr });
+    } else {
+      out.push({ kind: "mdlink", label, addr });
+    }
 
     i = parsed.end;
     last = parsed.end;
@@ -212,9 +215,14 @@ function convertByMdInlineSegments(
       continue;
     }
 
-    const label = seg.isImage ? seg.label : convertPlain(seg.label, stats);
-    if (seg.isImage) out.push(`![${label}](${seg.addr})`);
-    else out.push(`[${label}](${seg.addr})`);
+    if (seg.kind === "mdlink") {
+      const label = convertPlain(seg.label, stats);
+      out.push(`[${label}](${seg.addr})`);
+      continue;
+    }
+
+    const label = convertPlain(seg.label, stats);
+    out.push(`![${label}](${seg.addr})`);
   }
 
   return out.join("");
@@ -567,7 +575,7 @@ function convertQuotesInParagraph(
       "奇数回退：单引号不成对，跳过该符号",
       localSkips,
     );
-    if (sqPos.length && dqSkip.size > 0) {
+    if (sqPos.length && sqSkip.size > 0) {
       stats.skipped_quote_paragraphs_single += 1;
     }
 
