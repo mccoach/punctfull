@@ -4,13 +4,6 @@ import { hasAnyTokenInRange } from "./tokenUtils";
 
 const TRIM_CHARS = `.,;:!?)}]>\'"”’，。；：？！】）》）`;
 const TRIM_RE = new RegExp(`[${escapeForCharClass(TRIM_CHARS)}]+$`);
-const DEBUG_PROTECT_B = true;
-
-function dbg(message: string, data?: unknown) {
-  if (!DEBUG_PROTECT_B) return;
-  if (data === undefined) console.log(`[PFDBG:B] ${message}`);
-  else console.log(`[PFDBG:B] ${message}`, data);
-}
 
 function escapeForCharClass(s: string) {
   return s.replace(/[-\\\]^]/g, "\\$&");
@@ -67,11 +60,13 @@ function parseMdLinkAt(text: string, start: number): ParsedMdLink | null {
   }
 
   if (i >= text.length || text[i] !== "[") return null;
-  const labelStart = i + 1;
+  const lineEnd = text.indexOf("\n", start);
+  const limit = lineEnd >= 0 ? lineEnd : text.length;
 
+  const labelStart = i + 1;
   let j = labelStart;
-  while (j < text.length) {
-    if (text[j] === "\\" && j + 1 < text.length) {
+  while (j < limit) {
+    if (text[j] === "\\" && j + 1 < limit) {
       j += 2;
       continue;
     }
@@ -79,17 +74,17 @@ function parseMdLinkAt(text: string, start: number): ParsedMdLink | null {
     j += 1;
   }
 
-  if (j >= text.length || text[j] !== "]") return null;
-  if (j + 1 >= text.length || text[j + 1] !== "(") return null;
+  if (j >= limit || text[j] !== "]") return null;
+  if (j + 1 >= limit || text[j + 1] !== "(") return null;
 
   const labelEnd = j;
   const addrStart = j + 2;
   let k = addrStart;
   let depth = 1;
 
-  while (k < text.length) {
+  while (k < limit) {
     const ch = text[k];
-    if (ch === "\\" && k + 1 < text.length) {
+    if (ch === "\\" && k + 1 < limit) {
       k += 2;
       continue;
     }
@@ -131,11 +126,6 @@ function protectMarkdownLinksAndImages(text: string, stats: Stats, store: TokenS
 
     const parsed = parseMdLinkAt(text, i);
     if (!parsed) {
-      dbg("parseMdLinkAt miss", {
-        index: i,
-        ch: text[i],
-        around: text.slice(Math.max(0, i - 20), Math.min(text.length, i + 80)),
-      });
       out.push(text[i]);
       i += 1;
       continue;
@@ -145,17 +135,7 @@ function protectMarkdownLinksAndImages(text: string, stats: Stats, store: TokenS
     const label = text.slice(parsed.labelStart, parsed.labelEnd);
     const addr = text.slice(parsed.addrStart, parsed.addrEnd);
 
-    dbg("parseMdLinkAt hit", {
-      isImage: parsed.isImage,
-      start: parsed.start,
-      end: parsed.end,
-      whole,
-      label,
-      addr,
-    });
-
     if (containsTokenMarker(whole) || containsTokenMarker(label) || containsTokenMarker(addr)) {
-      dbg("skip because token marker exists", { whole, label, addr });
       out.push(whole);
       i = parsed.end;
       continue;
@@ -164,16 +144,7 @@ function protectMarkdownLinksAndImages(text: string, stats: Stats, store: TokenS
     const leftToken = store.put(parsed.isImage ? "![" : "[");
     const rightToken = store.put(`](${addr})`);
 
-    const replaced = leftToken + label + rightToken;
-    dbg("replace md link/image", {
-      isImage: parsed.isImage,
-      wholeBefore: whole,
-      wholeAfter: replaced,
-      leftToken,
-      rightToken,
-    });
-
-    out.push(replaced);
+    out.push(leftToken + label + rightToken);
     stats.protected_B_fragments += 2;
 
     i = parsed.end;
@@ -265,13 +236,8 @@ export function protectB(text: string, stats: Stats): { text: string; store: Tok
   const store = new TokenStore("B");
   if (!text) return { text, store };
 
-  dbg("protectB input head", text.slice(0, 800));
   text = protectMarkdownLinksAndImages(text, stats, store);
-  dbg("after protectMarkdownLinksAndImages", text.slice(0, 800));
-
   text = protectCommonTechnicalFragments(text, stats, store);
-  dbg("after protectCommonTechnicalFragments", text.slice(0, 800));
 
-  dbg("store items", store.items.map((x, i) => ({ i, v: x })));
   return { text, store };
 }
