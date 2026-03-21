@@ -11,6 +11,65 @@ const THEMES = {
   dark: { monaco: "vs-dark", attr: "dark" },
 } as const;
 
+const OPTION_ITEMS = [
+  {
+    id: "opt_basic",
+    checked: true,
+    label: "基础标点",
+    tip:
+      "把半角基础标点转换为全角：, . : ; ? !\n\n注意：仅在检测到中文语境（附近有中文/中文标点）时才触发；尽量避免影响纯英文段落。",
+  },
+  {
+    id: "opt_ellipsis",
+    checked: true,
+    label: "省略号",
+    tip:
+      "把连续英文点号 ...（3 个或更多）转换为中文省略号 ……\n\n同样受中文语境触发限制；代码/链接等保护区不会动。",
+  },
+  {
+    id: "opt_emph",
+    checked: true,
+    label: "连续/组合标点",
+    tip:
+      "把连续强调标点做中文化：\n- !!! → ！！！\n- ??? → ？？？\n- ?! / !? → ？！ / ！？\n\n同样受中文语境触发限制。",
+  },
+  {
+    id: "opt_dash",
+    checked: true,
+    label: "破折号",
+    tip:
+      "把恰好两个连字符 -- 转为中文破折号 ——\n\n并且做了一个保护：如果后面紧跟字母/数字/下划线（可能是参数/标识符），就不转换。",
+  },
+  {
+    id: "opt_quotes",
+    checked: true,
+    label: "引号",
+    tip:
+      "把英文引号转换为中文引号：\n- \\\" → “ ”（成对时）\n- '  → ‘ ’（更保守：排除英文缩写里的 apostrophe）\n\n奇数回退：如果某段候选引号数量为奇数，则该段一个都不转，只标记为“跳过原因”（右侧灰色并可悬浮查看）。",
+  },
+  {
+    id: "opt_parens",
+    checked: true,
+    label: "括号（语义）",
+    tip:
+      "括号语义转换（非常保守）：仅当括号内容看起来像“短中文解释”（例如：（术语））时，才把 ( ) 转为 （ ）\n\n技术性内容/链接/代码样式内容不会转换。",
+  },
+  {
+    id: "opt_fixpairs",
+    checked: true,
+    label: "成对符号纠错",
+    tip:
+      "成对符号纠错（强保守，可选）：\n当检测到中文语境，并且段落不像技术文本时，尝试修正一些明显的成对符号错误，例如：\n- ““ → ”\n- ”” → “”\n- 段落内只出现两次同向符号时尝试补成对\n\n这是 legacy 修复器：有可能改到你不想改的地方，所以默认可开可关。",
+  },
+  {
+    id: "opt_boldsym",
+    checked: true,
+    label: "加粗符号修复",
+    tip:
+      "修复 Markdown 加粗符号 ** 的兼容性问题：\n1. 去掉 **内容** 两侧内部的非法空格；\n2. 当左 ** 左侧紧邻字母/数字/汉字，且加粗内容首字符是符号时，在左 ** 前补一个空格。\n3. 当右 ** 左侧紧邻非文字，而右侧紧邻文字时，在右 ** 后补一个空格。\n\n仅处理正文区，代码/链接/表格/公式等保护区不会动。",
+  },
+] as const;
+
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string) {
   const n = document.createElement(tag);
   if (className) n.className = className;
@@ -44,6 +103,19 @@ function getOptionsFromUI(root: HTMLElement): Options {
   };
 }
 
+function buildOptionLabel(item: typeof OPTION_ITEMS[number]): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.setAttribute("data-tip", item.tip);
+
+  const input = document.createElement("input");
+  input.id = item.id;
+  input.type = "checkbox";
+  input.checked = item.checked;
+
+  label.append(input, ` ${item.label}`);
+  return label;
+}
+
 export function initUI(container: HTMLElement) {
   /* ===== Top bar ===== */
   const topbar = el("div", "topbar");
@@ -71,39 +143,9 @@ export function initUI(container: HTMLElement) {
   optLegend.textContent = "转换选项";
   optBox.appendChild(optLegend);
 
-  optBox.insertAdjacentHTML("beforeend", `
-  <label data-tip="把半角基础标点转换为全角：, . : ; ? !\n\n注意：仅在检测到中文语境（附近有中文/中文标点）时才触发；尽量避免影响纯英文段落。">
-    <input id="opt_basic" type="checkbox" checked /> 基础标点
-  </label>
-
-  <label data-tip="把连续英文点号 ...（3 个或更多）转换为中文省略号 ……\n\n同样受中文语境触发限制；代码/链接等保护区不会动。">
-    <input id="opt_ellipsis" type="checkbox" checked /> 省略号
-  </label>
-
-  <label data-tip="把连续强调标点做中文化：\n- !!! → ！！！\n- ??? → ？？？\n- ?! / !? → ？！ / ！？\n\n同样受中文语境触发限制。">
-    <input id="opt_emph" type="checkbox" checked /> 连续/组合标点
-  </label>
-
-  <label data-tip="把恰好两个连字符 -- 转为中文破折号 ——\n\n并且做了一个保护：如果后面紧跟字母/数字/下划线（可能是参数/标识符），就不转换。">
-    <input id="opt_dash" type="checkbox" checked /> 破折号
-  </label>
-
-  <label data-tip="把英文引号转换为中文引号：\n- \\" → " "（成对时）\n- '  → ' '（更保守：排除英文缩写里的 apostrophe）\n\n奇数回退：如果某段候选引号数量为奇数，则该段一个都不转，只标记为"跳过原因"（右侧灰色并可悬浮查看）。">
-    <input id="opt_quotes" type="checkbox" checked /> 引号
-  </label>
-
-  <label data-tip="括号语义转换（非常保守）：仅当括号内容看起来像"短中文解释"（例如：（术语））时，才把 ( ) 转为 （ ）\n\n技术性内容/链接/代码样式内容不会转换。">
-    <input id="opt_parens" type="checkbox" checked /> 括号（语义）
-  </label>
-
-  <label data-tip="成对符号纠错（强保守，可选）：\n当检测到中文语境，并且段落不像技术文本时，尝试修正一些明显的成对符号错误，例如：\n- "" → ""\n- "" → ""\n- 段落内只出现两次同向符号时尝试补成对\n\n这是 legacy 修复器：有可能改到你不想改的地方，所以默认可开可关。">
-    <input id="opt_fixpairs" type="checkbox" checked /> 成对符号纠错
-  </label>
-
-  <label data-tip="修复 Markdown 加粗符号 ** 的兼容性问题：\n1. 去掉 **内容** 两侧内部的非法空格；\n2. 当左 ** 左侧紧邻字母/数字/汉字，且加粗内容首字符是符号时，在左 ** 前补一个空格。\n3. 当右 ** 左侧紧邻非文字，而右侧紧邻文字时，在右 ** 后补一个空格。\n\n仅处理正文区，代码/链接/表格/公式等保护区不会动。">
-    <input id="opt_boldsym" type="checkbox" checked /> 加粗符号修复
-  </label>
-  `);
+  for (const item of OPTION_ITEMS) {
+    optBox.appendChild(buildOptionLabel(item));
+  }
 
   topCenter.append(optBox);
 

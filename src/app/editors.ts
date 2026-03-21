@@ -2,14 +2,23 @@ import * as monaco from "monaco-editor";
 
 type ViewState = monaco.editor.ICodeEditorViewState | null;
 
-export function createEditors(leftHost: HTMLElement, rightHost: HTMLElement) {
-  // Monaco workers (minimal)
+function ensureMonacoWorkerEnvironment() {
   (self as any).MonacoEnvironment = {
     getWorkerUrl(_moduleId: string, _label: string) {
-      // Let Vite handle it
       return new URL("./monacoWorkerShim.js", import.meta.url).toString();
     }
   };
+}
+
+function syncScrollTop(
+  src: monaco.editor.IStandaloneCodeEditor,
+  dst: monaco.editor.IStandaloneCodeEditor,
+) {
+  dst.setScrollTop(src.getScrollTop());
+}
+
+export function createEditors(leftHost: HTMLElement, rightHost: HTMLElement) {
+  ensureMonacoWorkerEnvironment();
 
   const baseOptions: monaco.editor.IStandaloneEditorConstructionOptions = {
     language: "markdown",
@@ -22,23 +31,17 @@ export function createEditors(leftHost: HTMLElement, rightHost: HTMLElement) {
     bracketPairColorization: { enabled: false }
   };
 
-  const leftEditor = monaco.editor.create(leftHost, {
-    ...baseOptions
-  });
+  const leftEditor = monaco.editor.create(leftHost, baseOptions);
+  const rightEditor = monaco.editor.create(rightHost, baseOptions);
 
-  const rightEditor = monaco.editor.create(rightHost, {
-    ...baseOptions
-  });
-
-  // Scroll sync (two-way with lock)
   let syncing = false;
 
   function syncFrom(src: monaco.editor.IStandaloneCodeEditor, dst: monaco.editor.IStandaloneCodeEditor) {
     if (syncing) return;
+
     syncing = true;
     try {
-      const top = src.getScrollTop();
-      dst.setScrollTop(top);
+      syncScrollTop(src, dst);
     } finally {
       syncing = false;
     }
@@ -50,6 +53,7 @@ export function createEditors(leftHost: HTMLElement, rightHost: HTMLElement) {
   function getRightViewState(): ViewState {
     return rightEditor.saveViewState();
   }
+
   function restoreRightViewState(v: ViewState) {
     if (!v) return;
     rightEditor.restoreViewState(v);

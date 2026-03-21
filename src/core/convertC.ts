@@ -28,14 +28,12 @@ export function convertC(text: string, options: Options, stats: Stats): string {
 
     let par = part;
 
+    // 1) Markdown compatibility fixes
     if (options.fix_md_bold_symbols) {
       par = fixMarkdownBoldSymbols(par, stats);
     }
 
-    if (options.convert_emphasis_punct) par = convertEmphasisPunct(par, stats);
-    if (options.convert_ellipsis) par = convertEllipsis(par, stats);
-    if (options.convert_dash) par = convertDash(par, stats);
-
+    // 2) Pair-like structures
     if (options.convert_quotes) {
       const r = convertQuotesInParagraph(par, stats);
       par = r.text;
@@ -48,7 +46,6 @@ export function convertC(text: string, options: Options, stats: Stats): string {
       }
     }
 
-    // odd fallback mark for ASCII brackets () [] {}
     const br = convertAsciiBracketsOddFallback(par);
     for (const s of br.localSkips) {
       stats.skip_ranges_tok.push({
@@ -62,13 +59,15 @@ export function convertC(text: string, options: Options, stats: Stats): string {
       par = convertParensSemantic(par, stats);
     }
 
-    if (options.convert_basic_punct) {
-      par = convertBasic(par, stats);
-    }
-
     if (options.fix_paired_symbols) {
       par = fixPairedSymbolsInParagraph(par, stats);
     }
+
+    // 3) Linear punctuation transforms
+    if (options.convert_emphasis_punct) par = convertEmphasisPunct(par, stats);
+    if (options.convert_ellipsis) par = convertEllipsis(par, stats);
+    if (options.convert_dash) par = convertDash(par, stats);
+    if (options.convert_basic_punct) par = convertBasic(par, stats);
 
     out.push(par);
     outPos += par.length;
@@ -93,10 +92,6 @@ function isHanChar(ch: string): boolean {
 
 function isWordLikeForBold(ch: string): boolean {
   return isAsciiLetterOrDigit(ch) || isHanChar(ch);
-}
-
-function isWhitespace(ch: string): boolean {
-  return !!ch && /\s/.test(ch);
 }
 
 function isNonWordLikeForBold(ch: string): boolean {
@@ -148,15 +143,11 @@ function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
     let prefix = "";
     let suffix = "";
 
-    // 左端规则：
-    // 当左 ** 右侧紧邻非文字时，其左侧也必须紧邻非文字；否则在左 ** 左侧补空格
     if (firstInner && isNonWordLikeForBold(firstInner) && !isNonWordLikeForBold(leftOuter)) {
       prefix = " ";
       inc(stats, "md_bold_symbol_fix", 1);
     }
 
-    // 右端规则：
-    // 当右 ** 左侧紧邻非文字时，其右侧也必须紧邻非文字；否则在右 ** 右侧补空格
     if (lastInner && isNonWordLikeForBold(lastInner) && !isNonWordLikeForBold(rightOuter)) {
       suffix = " ";
       inc(stats, "md_bold_symbol_fix", 1);
@@ -196,9 +187,6 @@ function looksChineseExplanatory(s: string): boolean {
   return zh / Math.max(1, s.length) >= 0.35 && s.length <= 30;
 }
 
-/**
- * Only convert (...) to （...） when Chinese-context gated and "short Chinese explanatory".
- */
 function convertParensSemantic(text: string, stats: Stats): string {
   const out: string[] = [];
   let i = 0;
@@ -281,6 +269,86 @@ function collectPositions(
 
 type LocalSkip = { start: number; end: number; reason: string };
 
+function collectDoubleQuoteCandidates(seg: string, gate: (pos: number) => boolean): number[] {
+  return collectPositions(seg, `"`, gate);
+}
+
+function collectApostrophePositions(seg: string): Set<number> {
+  const apost = new Set<number>();
+  for (let i = 0; i < seg.length - 2; i++) {
+    const a = seg[i];
+    const b = seg[i + 1];
+    const c = seg[i + 2];
+    if (/[A-Za-z]/.test(a) && b === "'" && /[A-Za-z]/.test(c)) {
+      apost.add(i + 1);
+    }
+  }
+  return apost;
+}
+
+function collectSingleQuoteCandidates(
+  seg: string,
+  gate: (pos: number) => boolean,
+  quoteBoundary: ReadonlySet<string>,
+): number[] {
+  const apost = collectApostrophePositions(seg);
+  const candidates: number[] = [];
+
+  for (let p = 0; p < seg.length; p++) {
+    if (seg[p] !== "'") continue;
+    if (apost.has(p)) continue;
+    if (!gate(p)) continue;
+
+    const prevc = p - 1 >= 0 ? seg[p - 1] : "";
+    const nextc = p + 1 < seg.length ? seg[p + 1] : "";
+    if (
+      prevc === "" ||
+      quoteBoundary.has(prevc) ||
+      nextc === "" ||
+      quoteBoundary.has(nextc)
+    ) {
+      candidates.push(p);
+    }
+  }
+
+  return candidates;
+}
+
+function markOddFallback(
+  positions: number[],
+  segStart: number,
+  reason: string,
+  localSkips: LocalSkip[],
+): Set<number> {
+  if (!positions.length || positions.length % 2 === 0) return new Set<number>();
+
+  const skipped = new Set<number>(positions);
+  for (const p of positions) {
+    localSkips.push({
+      start: segStart + p,
+      end: segStart + p + 1,
+      reason,
+    });
+  }
+  return skipped;
+}
+
+function applyAlternatingQuotes(
+  chars: string[],
+  positions: number[],
+  leftQuote: string,
+  rightQuote: string,
+  stats: Stats,
+  statKey: string,
+) {
+  let left = true;
+  for (const p of positions) {
+    chars[p] = left ? leftQuote : rightQuote;
+    inc(stats, statKey, 1);
+    left = !left;
+  }
+}
+
 function convertQuotesInParagraph(
   par: string,
   stats: Stats,
@@ -300,78 +368,36 @@ function convertQuotesInParagraph(
   function convertSegment(seg: string, segStart: number): string {
     const gate = (pos: number) => shouldConvertAt(seg, pos);
 
-    const dqPos = collectPositions(seg, `"`, gate);
-    let dqSkip = new Set<number>();
-    if (dqPos.length && dqPos.length % 2 === 1) {
+    const dqPos = collectDoubleQuoteCandidates(seg, gate);
+    const dqSkip = markOddFallback(
+      dqPos,
+      segStart,
+      "奇数回退：双引号不成对，跳过该符号",
+      localSkips,
+    );
+    if (dqPos.length && dqSkip.size > 0) {
       stats.skipped_quote_paragraphs_double += 1;
-      dqSkip = new Set(dqPos);
-      for (const p of dqPos) {
-        localSkips.push({
-          start: segStart + p,
-          end: segStart + p + 1,
-          reason: "奇数回退：双引号不成对，跳过该符号",
-        });
-      }
     }
 
-    // apostrophe in English word: [A-Za-z]('[A-Za-z])
-    const apost = new Set<number>();
-    for (let i = 0; i < seg.length - 2; i++) {
-      const a = seg[i],
-        b = seg[i + 1],
-        c = seg[i + 2];
-      if (/[A-Za-z]/.test(a) && b === "'" && /[A-Za-z]/.test(c))
-        apost.add(i + 1);
-    }
-
-    const sqCandidates: number[] = [];
-    for (let p = 0; p < seg.length; p++) {
-      if (seg[p] !== "'") continue;
-      if (apost.has(p)) continue;
-      if (!gate(p)) continue;
-      const prevc = p - 1 >= 0 ? seg[p - 1] : "";
-      const nextc = p + 1 < seg.length ? seg[p + 1] : "";
-      if (
-        prevc === "" ||
-        QUOTE_BOUNDARY.has(prevc) ||
-        nextc === "" ||
-        QUOTE_BOUNDARY.has(nextc)
-      ) {
-        sqCandidates.push(p);
-      }
-    }
-
-    let sqSkip = new Set<number>();
-    if (sqCandidates.length && sqCandidates.length % 2 === 1) {
+    const sqCandidates = collectSingleQuoteCandidates(seg, gate, QUOTE_BOUNDARY);
+    const sqSkip = markOddFallback(
+      sqCandidates,
+      segStart,
+      "奇数回退：单引号不成对，跳过该符号",
+      localSkips,
+    );
+    if (sqCandidates.length && sqSkip.size > 0) {
       stats.skipped_quote_paragraphs_single += 1;
-      sqSkip = new Set(sqCandidates);
-      for (const p of sqCandidates) {
-        localSkips.push({
-          start: segStart + p,
-          end: segStart + p + 1,
-          reason: "奇数回退：单引号不成对，跳过该符号",
-        });
-      }
     }
 
     const chars = seg.split("");
 
     if (dqPos.length && dqSkip.size === 0) {
-      let left = true;
-      for (const p of dqPos) {
-        chars[p] = left ? "“" : "”";
-        inc(stats, "double_quotes", 1);
-        left = !left;
-      }
+      applyAlternatingQuotes(chars, dqPos, "“", "”", stats, "double_quotes");
     }
 
     if (sqCandidates.length && sqSkip.size === 0) {
-      let left = true;
-      for (const p of sqCandidates) {
-        chars[p] = left ? "‘" : "’";
-        inc(stats, "single_quotes", 1);
-        left = !left;
-      }
+      applyAlternatingQuotes(chars, sqCandidates, "‘", "’", stats, "single_quotes");
     }
 
     return chars.join("");
@@ -500,19 +526,26 @@ function convertDash(text: string, stats: Stats): string {
   });
 }
 
-function collectProtectedNumberDots(text: string): Set<number> {
-  const keep = new Set<number>();
-  const re = /\d{1,9}\.(?=[ \t])/g;
-  for (const m of text.matchAll(re)) {
-    const start = m.index ?? 0;
-    const dotIdx = start + m[0].length - 1;
-    keep.add(dotIdx);
-  }
-  return keep;
+function isDigit(ch: string): boolean {
+  return !!ch && /[0-9]/.test(ch);
+}
+
+function isDotSentenceEndContext(text: string, idx: number): boolean {
+  const next = idx + 1 < text.length ? text[idx + 1] : "";
+  return next === "" || /\s/.test(next) || /[)\]}”’>]/.test(next);
+}
+
+function isStructuralAsciiDot(text: string, idx: number): boolean {
+  const prev = idx - 1 >= 0 ? text[idx - 1] : "";
+  const next = idx + 1 < text.length ? text[idx + 1] : "";
+
+  if (isDigit(prev) && (next === "" || /\s/.test(next))) return true;
+  if (isDigit(prev) && isDigit(next)) return true;
+
+  return false;
 }
 
 function convertBasic(text: string, stats: Stats): string {
-  // 1) , ; ? !
   for (const [k, v] of Object.entries(BASIC_MAP)) {
     const snap = text;
     text = replaceChar(text, k, (idx) => {
@@ -522,7 +555,6 @@ function convertBasic(text: string, stats: Stats): string {
     });
   }
 
-  // 2) colon (avoid :tag:), gate on snapshot
   {
     const snap = text;
     text = text.replace(/:(?![A-Za-z0-9_+\-]+:)/g, (m, offset) => {
@@ -533,19 +565,12 @@ function convertBasic(text: string, stats: Stats): string {
     });
   }
 
-  // 3) protect number-dot-space patterns such as:
-  //    1. item
-  //    ## 1. title
-  //    see 2. section
-  const protectedNumberDots = collectProtectedNumberDots(text);
-
-  // 4) dot to 。 at end-ish, gate on snapshot
   {
     const snap = text;
-    text = text.replace(/\.(?=(\s|$|[)\]}”’>]))/g, (m, offset) => {
-      const idx = Number(offset);
-      if (protectedNumberDots.has(idx)) return ".";
-      if (!shouldConvertAt(snap, idx)) return ".";
+    text = replaceChar(text, ".", (idx) => {
+      if (!isDotSentenceEndContext(snap, idx)) return null;
+      if (isStructuralAsciiDot(snap, idx)) return null;
+      if (!shouldConvertAt(snap, idx)) return null;
       inc(stats, ".->。", 1);
       return "。";
     });

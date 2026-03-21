@@ -8,30 +8,6 @@ import { protectB } from "./protectB";
 import { convertC } from "./convertC";
 import { formatStats } from "./formatStats";
 
-function fmtSummary(stats: Stats): string {
-  // Minimal summary for now; later we’ll port your _format_stats.
-  const repCount = Object.values(stats.replaced).reduce((a, b) => a + b, 0);
-  const prot = [
-    stats.protected_A_blocks ? `A ${stats.protected_A_blocks}段` : "",
-    stats.protected_table_blocks ? `表格 ${stats.protected_table_blocks}块` : "",
-    stats.protected_B_fragments ? `B ${stats.protected_B_fragments}处` : ""
-  ].filter(Boolean);
-
-  const skips = [
-    stats.skipped_quote_paragraphs_double ? `双引号奇数回退 ${stats.skipped_quote_paragraphs_double}段` : "",
-    stats.skipped_quote_paragraphs_single ? `单引号奇数回退 ${stats.skipped_quote_paragraphs_single}段` : ""
-  ].filter(Boolean);
-
-  const fix = (stats.fixed_pairs_near + stats.fixed_pairs_two_same) || 0;
-
-  const parts: string[] = [];
-  parts.push(`转换：${repCount}处`);
-  if (prot.length) parts.push(`保护：${prot.join("；")}`);
-  if (skips.length) parts.push(`提示：${skips.join("；")}`);
-  if (fix) parts.push(`修正：${fix}处`);
-  return parts.join(" | ");
-}
-
 export function processMarkdown(input: string, options: Options): { text: string; stats: Stats } {
   const stats = makeEmptyStats();
   let text = input;
@@ -63,7 +39,7 @@ export function processMarkdown(input: string, options: Options): { text: string
     stats.skip_ranges_tok.push({ start: sp.start, end: sp.end, reason: sp.reason });
   }
 
-  // Restore with coord maps: B -> T -> A (same order as Python)
+  // Restore with coord maps: B -> T -> A
   const rb = storeB.restoreWithCoordMap(text);
   text = rb.text;
   const mapB = rb.map;
@@ -76,17 +52,12 @@ export function processMarkdown(input: string, options: Options): { text: string
   text = ra.text;
   const mapA = ra.map;
 
-  const mapThroughAll = (s: number, e: number) => {
-    let r = mapB.mapRange(s, e);
-    r = mapT.mapRange(r.s, r.e);
-    r = mapA.mapRange(r.s, r.e);
-    return r;
-  };
-
   const outRanges: SkipRange[] = [];
   for (const r of stats.skip_ranges_tok) {
-    const m = mapThroughAll(r.start, r.end);
-    outRanges.push({ start: m.s, end: m.e, reason: r.reason });
+    let mapped = mapB.mapRange(r.start, r.end);
+    mapped = mapT.mapRange(mapped.s, mapped.e);
+    mapped = mapA.mapRange(mapped.s, mapped.e);
+    outRanges.push({ start: mapped.s, end: mapped.e, reason: r.reason });
   }
   stats.skip_ranges_out = outRanges;
 

@@ -11,50 +11,29 @@ const RE_FENCE_END = /^(?<indent>[ \t]*)(?<fence>`{3,}|~{3,})[ \t]*$/;
 
 export function protectA(text: string, stats: Stats): { text: string; store: TokenStore } {
   const store = new TokenStore("A");
-  let out = text;
 
-  out = protectYamlFrontMatter(out, store, stats);
-  out = protectFencedCodeBlocks(out, store, stats);
-  out = protectInlineCode(out, store, stats);
-  out = protectMath(out, store, stats);
-  out = protectHtml(out, store, stats);
+  text = protectYamlFrontMatter(text, store, stats);
+  text = protectFencedCodeBlocks(text, store, stats);
+  text = protectInlineCode(text, store, stats);
+  text = protectMath(text, store, stats);
+  text = protectHtml(text, store, stats);
 
-  return { text: out, store };
+  return { text, store };
 }
 
 function protectYamlFrontMatter(text: string, store: TokenStore, stats: Stats): string {
-  // Mimic Python:
-  // m = re.match(r"(\ufeff)?([ \t]*\n)*", text)
-  // start = m.end()
-  // if not re.match(r"^[ \t]*---[ \t]*\n", text[start:]): return
   const m = text.match(/^(\ufeff)?([ \t]*\n)*/);
   const start = m ? m[0].length : 0;
 
   if (!/^[ \t]*---[ \t]*\n/.test(text.slice(start))) return text;
 
   const lines = splitLinesKeepEnds(text);
-  let pos = 0;
-  let startLine: number | null = null;
-
-  for (let idx = 0; idx < lines.length; idx++) {
-    if (pos >= start) {
-      startLine = idx;
-      break;
-    }
-    pos += lines[idx].length;
-  }
-  if (startLine === null) return text;
-
+  const startLine = findLineIndexAtOrAfter(lines, start);
+  if (startLine < 0) return text;
   if (!/^[ \t]*---[ \t]*\n?$/.test(lines[startLine])) return text;
 
-  let endLine: number | null = null;
-  for (let j = startLine + 1; j < lines.length; j++) {
-    if (/^[ \t]*(---|\.\.\.)[ \t]*\n?$/.test(lines[j])) {
-      endLine = j;
-      break;
-    }
-  }
-  if (endLine === null) return text;
+  const endLine = findYamlFrontMatterEnd(lines, startLine);
+  if (endLine < 0) return text;
 
   const block = lines.slice(startLine, endLine + 1).join("");
   const token = store.put(block);
@@ -63,43 +42,77 @@ function protectYamlFrontMatter(text: string, store: TokenStore, stats: Stats): 
   return lines.slice(0, startLine).join("") + token + lines.slice(endLine + 1).join("");
 }
 
+function findLineIndexAtOrAfter(lines: string[], offset: number): number {
+  let pos = 0;
+  for (let idx = 0; idx < lines.length; idx++) {
+    if (pos >= offset) return idx;
+    pos += lines[idx].length;
+  }
+  return -1;
+}
+
+function findYamlFrontMatterEnd(lines: string[], startLine: number): number {
+  for (let j = startLine + 1; j < lines.length; j++) {
+    if (/^[ \t]*(---|\.\.\.)[ \t]*\n?$/.test(lines[j])) {
+      return j;
+    }
+  }
+  return -1;
+}
+
 function protectFencedCodeBlocks(text: string, store: TokenStore, stats: Stats): string {
   const lines = splitLinesKeepEnds(text);
   const out: string[] = [];
   let i = 0;
 
   while (i < lines.length) {
-    const m = RE_FENCE_START.exec(lines[i]);
-    if (!m) {
+    const start = parseFenceStart(lines[i]);
+    if (!start) {
       out.push(lines[i]);
       i += 1;
       continue;
     }
 
-    const fence = (m.groups?.fence ?? "");
-    const fenceChar = fence[0];
-    const fenceLen = fence.length;
-
-    let j = i + 1;
-    while (j < lines.length) {
-      const mEnd = RE_FENCE_END.exec(lines[j]);
-      if (mEnd) {
-        const f2 = (mEnd.groups?.fence ?? "");
-        if (f2 && f2[0] === fenceChar && f2.length >= fenceLen) {
-          j += 1;
-          break;
-        }
-      }
-      j += 1;
-    }
-
-    const block = lines.slice(i, j).join("");
+    const end = findFenceBlockEnd(lines, i + 1, start.fenceChar, start.fenceLen);
+    const block = lines.slice(i, end).join("");
     out.push(store.put(block));
     stats.protected_A_blocks += 1;
-    i = j;
+    i = end;
   }
 
   return out.join("");
+}
+
+function parseFenceStart(line: string): { fenceChar: string; fenceLen: number } | null {
+  const m = RE_FENCE_START.exec(line);
+  if (!m) return null;
+
+  const fence = m.groups?.fence ?? "";
+  if (!fence) return null;
+
+  return { fenceChar: fence[0], fenceLen: fence.length };
+}
+
+function findFenceBlockEnd(
+  lines: string[],
+  startIndex: number,
+  fenceChar: string,
+  fenceLen: number,
+): number {
+  let j = startIndex;
+
+  while (j < lines.length) {
+    const mEnd = RE_FENCE_END.exec(lines[j]);
+    if (mEnd) {
+      const f2 = mEnd.groups?.fence ?? "";
+      if (f2 && f2[0] === fenceChar && f2.length >= fenceLen) {
+        return j + 1;
+      }
+    }
+    j += 1;
+  }
+
+  return j;
 }
 
 function protectInlineCode(text: string, store: TokenStore, stats: Stats): string {
@@ -114,49 +127,51 @@ function protectInlineCode(text: string, store: TokenStore, stats: Stats): strin
       continue;
     }
 
-    let j = i;
-    while (j < n && text[j] === "`") j += 1;
-    const tickLen = j - i;
+    const tickLen = countRun(text, i, "`");
+    const end = findMatchingTickRun(text, i + tickLen, tickLen);
 
-    let k = j;
-    let found = false;
-
-    while (k < n) {
-      if (text[k] !== "`") {
-        k += 1;
-        continue;
-      }
-      let k2 = k;
-      while (k2 < n && text[k2] === "`") k2 += 1;
-      if (k2 - k === tickLen) {
-        const frag = text.slice(i, k2);
-        out.push(store.put(frag));
-        stats.protected_A_blocks += 1;
-        i = k2;
-        found = true;
-        break;
-      }
-      k = k2;
-    }
-
-    if (!found) {
+    if (end < 0) {
       out.push(text[i]);
       i += 1;
+      continue;
     }
+
+    const frag = text.slice(i, end);
+    out.push(store.put(frag));
+    stats.protected_A_blocks += 1;
+    i = end;
   }
 
   return out.join("");
 }
 
+function countRun(text: string, start: number, ch: string): number {
+  let i = start;
+  while (i < text.length && text[i] === ch) i += 1;
+  return i - start;
+}
+
+function findMatchingTickRun(text: string, start: number, tickLen: number): number {
+  let k = start;
+  while (k < text.length) {
+    if (text[k] !== "`") {
+      k += 1;
+      continue;
+    }
+
+    const runLen = countRun(text, k, "`");
+    if (runLen === tickLen) return k + runLen;
+    k += runLen;
+  }
+  return -1;
+}
+
 function protectMath(text: string, store: TokenStore, stats: Stats): string {
-  // $$...$$ blocks (DOTALL)
   text = text.replace(/\$\$[\s\S]*?\$\$/g, (m) => {
     stats.protected_A_blocks += 1;
     return store.put(m);
   });
 
-  // inline $...$ with constraints: \$(?!\s)([^\n$]*?)(?<!\s)\$
-  // JS supports lookbehind in modern browsers; GitHub Pages users are on modern engines.
   const inlineRe = /\$(?!\s)([^\n$]*?)(?<!\s)\$/g;
   text = text.replace(inlineRe, (m) => {
     stats.protected_A_blocks += 1;
@@ -167,13 +182,11 @@ function protectMath(text: string, store: TokenStore, stats: Stats): string {
 }
 
 function protectHtml(text: string, store: TokenStore, stats: Stats): string {
-  // <!-- ... -->
   text = text.replace(/<!--[\s\S]*?-->/g, (m) => {
     stats.protected_A_blocks += 1;
     return store.put(m);
   });
 
-  // <...> but not spanning lines
   text = text.replace(/<[^>\n]+?>/g, (m) => {
     stats.protected_A_blocks += 1;
     return store.put(m);
@@ -183,18 +196,16 @@ function protectHtml(text: string, store: TokenStore, stats: Stats): string {
 }
 
 function splitLinesKeepEnds(s: string): string[] {
-  // Equivalent to Python splitlines(keepends=True)
-  // Handles \n and \r\n
   const out: string[] = [];
   let start = 0;
+
   for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (ch === "\n") {
+    if (s[i] === "\n") {
       out.push(s.slice(start, i + 1));
       start = i + 1;
     }
   }
+
   if (start < s.length) out.push(s.slice(start));
-  // If s ends with \n, above will have pushed that line; start == len => no extra
   return out;
 }

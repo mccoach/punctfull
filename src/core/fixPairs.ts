@@ -25,10 +25,29 @@ function isFixParagraphTooTechnical(par: string): boolean {
   if (techMarks.test(par)) return true;
 
   let ascii = 0;
-  for (const ch of par) if (ch.charCodeAt(0) < 128) ascii += 1;
-  if (ascii / Math.max(1, par.length) > 0.8 && /[A-Za-z0-9]/.test(par)) return true;
+  for (const ch of par) {
+    if (ch.charCodeAt(0) < 128) ascii += 1;
+  }
+  if (ascii / Math.max(1, par.length) > 0.8 && /[A-Za-z0-9]/.test(par)) {
+    return true;
+  }
 
   return false;
+}
+
+function allPositions(hay: string, needle: string): number[] {
+  const out: number[] = [];
+  if (!needle) return out;
+
+  let idx = 0;
+  while (true) {
+    const i = hay.indexOf(needle, idx);
+    if (i < 0) break;
+    out.push(i);
+    idx = i + needle.length;
+  }
+
+  return out;
 }
 
 function fixNearDuplicateSameDirection(par: string, left: string, right: string, stats: Stats): string {
@@ -55,17 +74,14 @@ function fixNearDuplicateSameDirection(par: string, left: string, right: string,
   return out;
 }
 
-function allPositions(hay: string, needle: string): number[] {
-  const out: number[] = [];
-  if (!needle) return out;
-  let idx = 0;
-  while (true) {
-    const i = hay.indexOf(needle, idx);
-    if (i < 0) break;
-    out.push(i);
-    idx = i + needle.length;
-  }
-  return out;
+function canFixTwoSame(pos1: number, pos2: number, par: string, checkPos: number): boolean {
+  return 1 <= (pos2 - pos1) && (pos2 - pos1) <= 220 && shouldConvertAt(par, checkPos);
+}
+
+function replaceAt(par: string, pos: number, ch: string): string {
+  const chars = par.split("");
+  chars[pos] = ch;
+  return chars.join("");
 }
 
 function fixTwoSameInParagraph(par: string, left: string, right: string, stats: Stats): string {
@@ -74,29 +90,30 @@ function fixTwoSameInParagraph(par: string, left: string, right: string, stats: 
   const total = posLeft.length + posRight.length;
   if (total !== 2) return par;
 
-  // case: two left, no right => change second to right
   if (posLeft.length === 2 && posRight.length === 0) {
     const [p1, p2] = posLeft;
-    if (1 <= (p2 - p1) && (p2 - p1) <= 220 && shouldConvertAt(par, p2)) {
-      const chars = par.split("");
-      chars[p2] = right;
+    if (canFixTwoSame(p1, p2, par, p2)) {
       stats.fixed_pairs_two_same += 1;
-      return chars.join("");
+      return replaceAt(par, p2, right);
     }
   }
 
-  // case: two right, no left => change first to left
   if (posRight.length === 2 && posLeft.length === 0) {
     const [p1, p2] = posRight;
-    if (1 <= (p2 - p1) && (p2 - p1) <= 220 && shouldConvertAt(par, p1)) {
-      const chars = par.split("");
-      chars[p1] = left;
+    if (canFixTwoSame(p1, p2, par, p1)) {
       stats.fixed_pairs_two_same += 1;
-      return chars.join("");
+      return replaceAt(par, p1, left);
     }
   }
 
   return par;
+}
+
+function applyPairFixRule(par: string, left: string, right: string, stats: Stats): string {
+  let out = par;
+  out = fixNearDuplicateSameDirection(out, left, right, stats);
+  out = fixTwoSameInParagraph(out, left, right, stats);
+  return out;
 }
 
 export function fixPairedSymbolsInParagraph(par: string, stats: Stats): string {
@@ -107,8 +124,7 @@ export function fixPairedSymbolsInParagraph(par: string, stats: Stats): string {
 
   let out = par;
   for (const [left, right] of PAIR_FIX_RULES) {
-    out = fixNearDuplicateSameDirection(out, left, right, stats);
-    out = fixTwoSameInParagraph(out, left, right, stats);
+    out = applyPairFixRule(out, left, right, stats);
   }
   return out;
 }

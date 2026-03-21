@@ -3,10 +3,30 @@ import type { SkipRange } from "../core/types";
 
 export type RangePair = { start: number; end: number };
 
-function toMonacoRange(model: monaco.editor.ITextModel, startOffset: number, endOffset: number): monaco.Range {
+function toMonacoRange(
+  model: monaco.editor.ITextModel,
+  startOffset: number,
+  endOffset: number,
+): monaco.Range {
   const s = model.getPositionAt(Math.max(0, startOffset));
   const e = model.getPositionAt(Math.max(0, endOffset));
   return new monaco.Range(s.lineNumber, s.column, e.lineNumber, e.column);
+}
+
+function buildInlineDecorations(
+  model: monaco.editor.ITextModel,
+  ranges: RangePair[],
+  className: string,
+): monaco.editor.IModelDeltaDecoration[] {
+  return ranges
+    .filter((r) => r.end > r.start)
+    .map((r) => ({
+      range: toMonacoRange(model, r.start, r.end),
+      options: {
+        inlineClassName: className,
+        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+      },
+    }));
 }
 
 export class Decorations {
@@ -27,25 +47,8 @@ export class Decorations {
     const rightModel = this.right.getModel();
     if (!leftModel || !rightModel) return;
 
-    const leftDecos: monaco.editor.IModelDeltaDecoration[] = inRangesOnLeft
-      .filter(r => r.end > r.start)
-      .map(r => ({
-        range: toMonacoRange(leftModel, r.start, r.end),
-        options: {
-          inlineClassName: "punctfull-diff-in",
-          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
-        }
-      }));
-
-    const rightDecos: monaco.editor.IModelDeltaDecoration[] = outRangesOnRight
-      .filter(r => r.end > r.start)
-      .map(r => ({
-        range: toMonacoRange(rightModel, r.start, r.end),
-        options: {
-          inlineClassName: "punctfull-diff-out",
-          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
-        }
-      }));
+    const leftDecos = buildInlineDecorations(leftModel, inRangesOnLeft, "punctfull-diff-in");
+    const rightDecos = buildInlineDecorations(rightModel, outRangesOnRight, "punctfull-diff-out");
 
     this.leftDiffIds = leftModel.deltaDecorations(this.leftDiffIds, leftDecos);
     this.rightDiffIds = rightModel.deltaDecorations(this.rightDiffIds, rightDecos);
@@ -56,14 +59,14 @@ export class Decorations {
     if (!model) return;
 
     const decos: monaco.editor.IModelDeltaDecoration[] = (skips || [])
-      .filter(s => s.end > s.start)
-      .map(s => ({
+      .filter((s) => s.end > s.start)
+      .map((s) => ({
         range: toMonacoRange(model, s.start, s.end),
         options: {
           inlineClassName: "punctfull-skip",
           hoverMessage: [{ value: s.reason || "跳过区域（原因未知）" }],
-          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
-        }
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
       }));
 
     this.rightSkipIds = model.deltaDecorations(this.rightSkipIds, decos);

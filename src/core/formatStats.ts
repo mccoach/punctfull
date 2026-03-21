@@ -4,53 +4,31 @@ function fmtCount(n: number): string {
   return `${n}处`;
 }
 
+const CONVERSION_ITEMS: Array<{ key: string; label: string }> = [
+  { key: ",->，", label: "逗号（,→，）" },
+  { key: ".->。", label: "句号（.→。）" },
+  { key: ":->：", label: "冒号（:→：）" },
+  { key: ";->；", label: "分号（;→；）" },
+  { key: "?->？", label: "问号（?→？）" },
+  { key: "!->！", label: "感叹号（!→！）" },
+  { key: "ellipsis", label: "省略号（...→……）" },
+  { key: "dash", label: "破折号（--→——）" },
+  { key: "double_quotes", label: "双引号（\"→“”）" },
+  { key: "single_quotes", label: "单引号（'→‘’）" },
+  { key: "parens_converted", label: "括号（( )→（ ））" },
+  { key: "exclaim_runs", label: "感叹号连写（!!!→！！！）" },
+  { key: "question_runs", label: "问号连写（???→？？？）" },
+  { key: "?!", label: "组合标点（?!→？！）" },
+  { key: "!?", label: "组合标点（!?→！？）" },
+  { key: "md_bold_symbol_fix", label: "Markdown 加粗符号修复" }
+];
+
 export function formatStats(stats: Stats): string {
-  const keyMap: Record<string, string> = {
-    "ellipsis": "省略号（...→……）",
-    "dash": "破折号（--→——）",
-    "double_quotes": "双引号（\"→“”）",
-    "single_quotes": "单引号（'→‘’）",
-    "parens_converted": "括号（( )→（ ））",
-    "exclaim_runs": "感叹号连写（!!!→！！！）",
-    "question_runs": "问号连写（???→？？？）",
-    "?!": "组合标点（?!→？！）",
-    "!?": "组合标点（!?→！？）",
-    ",->，": "逗号（,→，）",
-    ";->；": "分号（;→；）",
-    "?->？": "问号（?→？）",
-    "!->！": "感叹号（!→！）",
-    ":->：": "冒号（:→：）",
-    ".->。": "句号（.→。）",
-    "md_bold_symbol_fix": "Markdown 加粗符号修复"
-  };
-
-  const order = [
-    "，", "。", "：", "；", "？", "！",
-    "ellipsis", "dash",
-    "double_quotes", "single_quotes",
-    "parens_converted",
-    "exclaim_runs", "question_runs",
-    "?!", "!?",
-    "md_bold_symbol_fix"
-  ];
-
-  const symbolToKey: Record<string, string> = {
-    "，": ",->，",
-    "。": ".->。",
-    "：": ":->：",
-    "；": ";->；",
-    "？": "?->？",
-    "！": "!->！"
-  };
-
   const items: string[] = [];
-  for (const it of order) {
-    const k = symbolToKey[it] ?? it;
-    const cnt = stats.replaced[k] ?? 0;
-    if (cnt) {
-      const title = keyMap[k] ?? k;
-      items.push(`${title}${fmtCount(cnt)}`);
-    }
+
+  for (const item of CONVERSION_ITEMS) {
+    const cnt = stats.replaced[item.key] ?? 0;
+    if (cnt) items.push(`${item.label}${fmtCount(cnt)}`);
   }
 
   const protectionParts: string[] = [];

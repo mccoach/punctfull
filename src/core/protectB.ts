@@ -42,7 +42,6 @@ function trimFragIfNeeded(name: string, frag: string): string {
 
 /**
  * Parse !?[...](...) and return (start, end, addrStart, addrEnd, isImage), else null.
- * Mirrors Python _parse_md_link_at.
  */
 function parseMdLinkAt(text: string, i: number):
   | { start: number; end: number; addrStart: number; addrEnd: number; isImage: boolean }
@@ -88,13 +87,64 @@ function parseMdLinkAt(text: string, i: number):
   return null;
 }
 
+function containsAnyTokenMarker(s: string): boolean {
+  return s.includes("⟦") || s.includes("⟧") || /⟦[ATB]\d+⟧/.test(s);
+}
+
+function protectMarkdownLinksAndImages(text: string, stats: Stats, store: TokenStore): string {
+  const out: string[] = [];
+  let i = 0;
+
+  while (i < text.length) {
+    if (text[i] !== "!" && text[i] !== "[") {
+      out.push(text[i]);
+      i += 1;
+      continue;
+    }
+
+    const parsed = parseMdLinkAt(text, i);
+    if (!parsed) {
+      out.push(text[i]);
+      i += 1;
+      continue;
+    }
+
+    const { start, end, addrStart, addrEnd, isImage } = parsed;
+    if (start > i) out.push(text.slice(i, start));
+
+    const whole = text.slice(start, end);
+    const addr = text.slice(addrStart, addrEnd);
+
+    if (containsAnyTokenMarker(whole)) {
+      out.push(whole);
+      i = end;
+      continue;
+    }
+
+    if (isImage) {
+      stats.protected_B_fragments += 1;
+      out.push(store.put(whole));
+      i = end;
+      continue;
+    }
+
+    if (containsAnyTokenMarker(addr)) {
+      out.push(whole);
+      i = end;
+      continue;
+    }
+
+    stats.protected_B_fragments += 1;
+    const token = store.put(addr);
+    out.push(text.slice(start, addrStart) + token + text.slice(addrEnd, end));
+    i = end;
+  }
+
+  return out.join("");
+}
+
 /**
  * PATH (no lookbehind) — compatibility-first.
- * We intentionally approximate Python patterns but avoid lookbehind:
- *  1) starts with ./ ../ ~/ or drive:\  (anchored by boundary in scan)
- *  2) contains at least one / or \  and looks like path-ish segments
- *
- * We scan with a broad regex and then apply boundary checks in code.
  */
 const RE_PATH_BROAD = /(?:\.\/|\.\.\/|~\/|[A-Za-z]:\\)[^\s<>()\]]+|[A-Za-z0-9._~\-]+(?:[\\/][A-Za-z0-9._~\-]+)+/g;
 
@@ -123,69 +173,26 @@ function isBoundaryBefore(text: string, idx: number): boolean {
 }
 
 function isForbiddenPathFraction(text: string, start: number, end: number): boolean {
-  // mimic: (?!\d+/\d+\b) in the python PATH second alternative
-  // If entire match is like 12/34 (ratio), don't treat as path.
   const frag = text.slice(start, end);
   return /^\d+\/\d+\b/.test(frag);
 }
 
-export function protectB(text: string, stats: Stats): { text: string; store: TokenStore } {
-  const store = new TokenStore("B");
-  if (!text) return { text, store };
+function isPatternMatchAllowed(name: string, text: string, start: number, end: number, frag: string): boolean {
+  if (frag.includes("⟦") || frag.includes("⟧")) return false;
+  if (hasAnyTokenInRange(text, start, end)) return false;
 
-  // 1) Protect markdown link addresses; for images, protect the whole syntax ![...](...)
-  const out: string[] = [];
-  let i = 0;
-
-  while (i < text.length) {
-    if (text[i] !== "!" && text[i] !== "[") {
-      out.push(text[i]);
-      i += 1;
-      continue;
-    }
-
-    const parsed = parseMdLinkAt(text, i);
-    if (!parsed) {
-      out.push(text[i]);
-      i += 1;
-      continue;
-    }
-
-    const { start, end, addrStart, addrEnd, isImage } = parsed;
-    if (start > i) out.push(text.slice(i, start));
-
-    const whole = text.slice(start, end);
-    const addr = text.slice(addrStart, addrEnd);
-
-    // exactly mirror python spirit: if token markers already exist, don't touch
-    if (whole.includes("⟦") || whole.includes("⟧") || /⟦[ATB]\d+⟧/.test(whole)) {
-      out.push(whole);
-      i = end;
-      continue;
-    }
-
-    if (isImage) {
-      stats.protected_B_fragments += 1;
-      out.push(store.put(whole));
-      i = end;
-      continue;
-    }
-
-    // normal link: only protect address part
-    if (addr.includes("⟦") || addr.includes("⟧") || /⟦[ATB]\d+⟧/.test(addr)) {
-      out.push(whole);
-    } else {
-      stats.protected_B_fragments += 1;
-      const token = store.put(addr);
-      out.push(text.slice(start, addrStart) + token + text.slice(addrEnd, end));
-    }
-
-    i = end;
+  if (name === "PATH") {
+    if (!isBoundaryBefore(text, start)) return false;
+    if (isForbiddenPathFraction(text, start, end)) return false;
   }
 
-  text = out.join("");
+  if (name === "URL" && !isValidUrl(frag)) return false;
+  if (name === "IPV4" && !isValidIpv4(frag)) return false;
 
-  // 2) Protect common technical fragments
+  return true;
+}
+
+function protectCommonTechnicalFragments(text: string, stats: Stats, store: TokenStore): string {
   for (const [name, re] of PATTERNS) {
     const parts: string[] = [];
     let last = 0;
@@ -196,19 +203,6 @@ export function protectB(text: string, stats: Stats): { text: string; store: Tok
       let frag = m[0];
       let e = s + frag.length;
 
-      // Skip any region that already contains token markers
-      if (frag.includes("⟦") || frag.includes("⟧")) continue;
-
-      // Skip if tokens appear inside this range
-      if (hasAnyTokenInRange(text, s, e)) continue;
-
-      // PATH boundary rules (no lookbehind substitute)
-      if (name === "PATH") {
-        if (!isBoundaryBefore(text, s)) continue;
-        if (isForbiddenPathFraction(text, s, e)) continue;
-      }
-
-      // Trim punctuation for certain types
       const trimmed = trimFragIfNeeded(name, frag);
       if (trimmed !== frag) {
         frag = trimmed;
@@ -216,9 +210,7 @@ export function protectB(text: string, stats: Stats): { text: string; store: Tok
         if (e <= s) continue;
       }
 
-      // extra validations
-      if (name === "URL" && !isValidUrl(frag)) continue;
-      if (name === "IPV4" && !isValidIpv4(frag)) continue;
+      if (!isPatternMatchAllowed(name, text, s, e, frag)) continue;
 
       parts.push(text.slice(last, s));
       parts.push(store.put(frag));
@@ -229,6 +221,16 @@ export function protectB(text: string, stats: Stats): { text: string; store: Tok
     parts.push(text.slice(last));
     text = parts.join("");
   }
+
+  return text;
+}
+
+export function protectB(text: string, stats: Stats): { text: string; store: TokenStore } {
+  const store = new TokenStore("B");
+  if (!text) return { text, store };
+
+  text = protectMarkdownLinksAndImages(text, stats, store);
+  text = protectCommonTechnicalFragments(text, stats, store);
 
   return { text, store };
 }

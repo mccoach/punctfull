@@ -7,6 +7,22 @@ function isTableRow(line: string): boolean {
   return (line.split("|").length - 1) >= 2;
 }
 
+function isTableStart(lines: string[], i: number): boolean {
+  return (
+    i + 1 < lines.length &&
+    isTableRow(lines[i]) &&
+    RE_TABLE_SEP.test(lines[i + 1])
+  );
+}
+
+function findTableEnd(lines: string[], start: number): number {
+  let end = start + 2;
+  while (end < lines.length && isTableRow(lines[end]) && lines[end].trim() !== "") {
+    end += 1;
+  }
+  return end;
+}
+
 function splitLinesKeepEnds(s: string): string[] {
   const out: string[] = [];
   let start = 0;
@@ -36,24 +52,17 @@ export function protectTables(text: string, stats: Stats): { text: string; store
   let i = 0;
 
   while (i < lines.length) {
-    // A table must have: header row at i, separator at i+1
-    if (i + 1 >= lines.length || !isTableRow(lines[i]) || !RE_TABLE_SEP.test(lines[i + 1])) {
+    if (!isTableStart(lines, i)) {
       out.push(lines[i]);
       i += 1;
       continue;
     }
 
-    // Determine end (include header + sep + following table rows)
-    let end = i + 2;
-    while (end < lines.length && isTableRow(lines[end]) && lines[end].trim() !== "") {
-      end += 1;
-    }
-
+    const end = findTableEnd(lines, i);
     const block = lines.slice(i, end).join("");
     out.push(store.put(block));
     stats.protected_table_blocks += 1;
-
-    i = end; // skip whole table block
+    i = end;
   }
 
   return { text: out.join(""), store };
