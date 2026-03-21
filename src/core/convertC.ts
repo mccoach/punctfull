@@ -1,4 +1,4 @@
-import type { Options, Stats, SkipRange } from "./types";
+import type { Options, Stats } from "./types";
 import { inc } from "./types";
 import { shouldConvertAt } from "./context";
 import { TOKEN_RE_ANY } from "./tokens";
@@ -91,7 +91,7 @@ function isHanChar(ch: string): boolean {
   return !!ch && /[\u4e00-\u9fff]/.test(ch);
 }
 
-function isWordLikeForBoldLeft(ch: string): boolean {
+function isWordLikeForBold(ch: string): boolean {
   return isAsciiLetterOrDigit(ch) || isHanChar(ch);
 }
 
@@ -99,12 +99,9 @@ function isWhitespace(ch: string): boolean {
   return !!ch && /\s/.test(ch);
 }
 
-function isSymbolLike(ch: string): boolean {
-  if (!ch) return false;
-  if (isWhitespace(ch)) return false;
-  if (isAsciiLetterOrDigit(ch)) return false;
-  if (isHanChar(ch)) return false;
-  return true;
+function isNonWordLikeForBold(ch: string): boolean {
+  if (!ch) return true;
+  return !isWordLikeForBold(ch);
 }
 
 function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
@@ -129,42 +126,43 @@ function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
       break;
     }
 
-    const leftNeighbor = open - 1 >= 0 ? par[open - 1] : "";
+    const leftOuter = open - 1 >= 0 ? par[open - 1] : "";
+    const rightOuter = close + 2 < n ? par[close + 2] : "";
     let inner = par.slice(open + 2, close);
-
-    let fixedThisPair = false;
 
     const trimmedLeft = inner.replace(/^[ \t]+/, "");
     if (trimmedLeft !== inner) {
       inner = trimmedLeft;
-      fixedThisPair = true;
       inc(stats, "md_bold_symbol_fix", 1);
     }
 
     const trimmedRight = inner.replace(/[ \t]+$/, "");
     if (trimmedRight !== inner) {
       inner = trimmedRight;
-      fixedThisPair = true;
       inc(stats, "md_bold_symbol_fix", 1);
     }
+
+    const firstInner = inner[0] ?? "";
+    const lastInner = inner[inner.length - 1] ?? "";
 
     let prefix = "";
-    const firstInner = inner[0] ?? "";
+    let suffix = "";
 
-    if (
-      leftNeighbor &&
-      !isWhitespace(leftNeighbor) &&
-      isWordLikeForBoldLeft(leftNeighbor) &&
-      firstInner &&
-      isSymbolLike(firstInner)
-    ) {
+    // 左端规则：
+    // 当左 ** 右侧紧邻非文字时，其左侧也必须紧邻非文字；否则在左 ** 左侧补空格
+    if (firstInner && isNonWordLikeForBold(firstInner) && !isNonWordLikeForBold(leftOuter)) {
       prefix = " ";
-      fixedThisPair = true;
       inc(stats, "md_bold_symbol_fix", 1);
     }
 
-    out.push(prefix + "**" + inner + "**");
+    // 右端规则：
+    // 当右 ** 左侧紧邻非文字时，其右侧也必须紧邻非文字；否则在右 ** 右侧补空格
+    if (lastInner && isNonWordLikeForBold(lastInner) && !isNonWordLikeForBold(rightOuter)) {
+      suffix = " ";
+      inc(stats, "md_bold_symbol_fix", 1);
+    }
 
+    out.push(prefix + "**" + inner + "**" + suffix);
     i = close + 2;
   }
 
@@ -259,7 +257,7 @@ function splitByTokens(par: string): SegPart[] {
     const s = m.index ?? 0;
     const tok = m[0];
     const e = s + tok.length;
-    if (s > last) parts.push({ kind: "text", s: par.slice(last, s) });
+    if (s > last) parts.push({ kind: "text", s: par.slice(last, s) } as SegPart);
     parts.push({ kind: "token", s: tok });
     last = e;
   }
