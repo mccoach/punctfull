@@ -41,16 +41,20 @@ function trimFragIfNeeded(name: string, frag: string): string {
 }
 
 /**
- * Parse !?[...](...) and return (start, end, addrStart, addrEnd), else null.
+ * Parse !?[...](...) and return (start, end, addrStart, addrEnd, isImage), else null.
  * Mirrors Python _parse_md_link_at.
  */
 function parseMdLinkAt(text: string, i: number):
-  | { start: number; end: number; addrStart: number; addrEnd: number }
+  | { start: number; end: number; addrStart: number; addrEnd: number; isImage: boolean }
   | null {
   const n = text.length;
   const start = i;
 
-  if (i < n && text[i] === "!") i += 1;
+  let isImage = false;
+  if (i < n && text[i] === "!") {
+    isImage = true;
+    i += 1;
+  }
   if (i >= n || text[i] !== "[") return null;
 
   let j = i + 1;
@@ -75,7 +79,7 @@ function parseMdLinkAt(text: string, i: number):
       if (depth === 0) {
         const addrEnd = k;
         const end = k + 1;
-        return { start, end, addrStart, addrEnd };
+        return { start, end, addrStart, addrEnd, isImage };
       }
     }
     k += 1;
@@ -129,7 +133,7 @@ export function protectB(text: string, stats: Stats): { text: string; store: Tok
   const store = new TokenStore("B");
   if (!text) return { text, store };
 
-  // 1) Protect markdown link addresses
+  // 1) Protect markdown link addresses; for images, protect the whole syntax ![...](...)
   const out: string[] = [];
   let i = 0;
 
@@ -147,13 +151,27 @@ export function protectB(text: string, stats: Stats): { text: string; store: Tok
       continue;
     }
 
-    const { start, end, addrStart, addrEnd } = parsed;
+    const { start, end, addrStart, addrEnd, isImage } = parsed;
     if (start > i) out.push(text.slice(i, start));
 
     const whole = text.slice(start, end);
     const addr = text.slice(addrStart, addrEnd);
 
-    // exactly mirror python: if addr already contains tokens/brackets, don't touch
+    // exactly mirror python spirit: if token markers already exist, don't touch
+    if (whole.includes("⟦") || whole.includes("⟧") || /⟦[ATB]\d+⟧/.test(whole)) {
+      out.push(whole);
+      i = end;
+      continue;
+    }
+
+    if (isImage) {
+      stats.protected_B_fragments += 1;
+      out.push(store.put(whole));
+      i = end;
+      continue;
+    }
+
+    // normal link: only protect address part
     if (addr.includes("⟦") || addr.includes("⟧") || /⟦[ATB]\d+⟧/.test(addr)) {
       out.push(whole);
     } else {
@@ -178,7 +196,7 @@ export function protectB(text: string, stats: Stats): { text: string; store: Tok
       let frag = m[0];
       let e = s + frag.length;
 
-      // Skip any region that already contains token markers (python: if "⟦" in frag or "⟧" in frag)
+      // Skip any region that already contains token markers
       if (frag.includes("⟦") || frag.includes("⟧")) continue;
 
       // Skip if tokens appear inside this range
