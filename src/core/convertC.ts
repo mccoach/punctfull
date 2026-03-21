@@ -257,7 +257,7 @@ function splitByTokens(par: string): SegPart[] {
     const s = m.index ?? 0;
     const tok = m[0];
     const e = s + tok.length;
-    if (s > last) parts.push({ kind: "text", s: par.slice(last, s) } as SegPart);
+    if (s > last) parts.push({ kind: "text", s: par.slice(last, s) });
     parts.push({ kind: "token", s: tok });
     last = e;
   }
@@ -500,6 +500,17 @@ function convertDash(text: string, stats: Stats): string {
   });
 }
 
+function collectProtectedNumberDots(text: string): Set<number> {
+  const keep = new Set<number>();
+  const re = /\d{1,9}\.(?=[ \t])/g;
+  for (const m of text.matchAll(re)) {
+    const start = m.index ?? 0;
+    const dotIdx = start + m[0].length - 1;
+    keep.add(dotIdx);
+  }
+  return keep;
+}
+
 function convertBasic(text: string, stats: Stats): string {
   // 1) , ; ? !
   for (const [k, v] of Object.entries(BASIC_MAP)) {
@@ -522,22 +533,18 @@ function convertBasic(text: string, stats: Stats): string {
     });
   }
 
-  // 3) ordered-list dot positions, computed on current text
-  const olDot = new Set<number>();
-  {
-    const re = /(\d{1,9})(\.)[ \t]+/g;
-    for (const mm of text.matchAll(re)) {
-      const dotIdx = (mm.index ?? 0) + mm[1].length;
-      olDot.add(dotIdx);
-    }
-  }
+  // 3) protect number-dot-space patterns such as:
+  //    1. item
+  //    ## 1. title
+  //    see 2. section
+  const protectedNumberDots = collectProtectedNumberDots(text);
 
   // 4) dot to 。 at end-ish, gate on snapshot
   {
     const snap = text;
     text = text.replace(/\.(?=(\s|$|[)\]}”’>]))/g, (m, offset) => {
       const idx = Number(offset);
-      if (olDot.has(idx)) return ".";
+      if (protectedNumberDots.has(idx)) return ".";
       if (!shouldConvertAt(snap, idx)) return ".";
       inc(stats, ".->。", 1);
       return "。";
