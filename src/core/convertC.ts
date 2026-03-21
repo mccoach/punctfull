@@ -17,26 +17,7 @@ const RE_LINE_WITH_END = /.*(?:\r?\n|$)/g;
 
 type LocalSkip = { start: number; end: number; reason: string };
 type SegPart = { kind: "text"; s: string } | { kind: "token"; s: string };
-
-type MdInlineSegment =
-  | { kind: "text"; s: string }
-  | { kind: "mdlink"; isImage: boolean; label: string; addr: string };
-
-type ParsedMdLinkLike = {
-  start: number;
-  end: number;
-  labelStart: number;
-  labelEnd: number;
-  addrStart: number;
-  addrEnd: number;
-  isImage: boolean;
-};
-
-type BoldPairFix = {
-  start: number;
-  end: number;
-  replacement: string;
-};
+type BoldPairFix = { start: number; end: number; replacement: string };
 
 export function convertC(text: string, options: Options, stats: Stats): string {
   const parts = splitParagraphsByBlankLines(text);
@@ -82,10 +63,10 @@ export function convertC(text: string, options: Options, stats: Stats): string {
       par = fixPairedSymbolsInParagraph(par, stats);
     }
 
-    if (options.convert_emphasis_punct) par = convertByMdInlineSegments(par, stats, convertEmphasisPunctPlain);
-    if (options.convert_ellipsis) par = convertByMdInlineSegments(par, stats, convertEllipsisPlain);
-    if (options.convert_dash) par = convertByMdInlineSegments(par, stats, convertDashPlain);
-    if (options.convert_basic_punct) par = convertByMdInlineSegments(par, stats, convertBasicPlain);
+    if (options.convert_emphasis_punct) par = convertTextByTokenSegments(par, stats, convertEmphasisPunctPlain);
+    if (options.convert_ellipsis) par = convertTextByTokenSegments(par, stats, convertEllipsisPlain);
+    if (options.convert_dash) par = convertTextByTokenSegments(par, stats, convertDashPlain);
+    if (options.convert_basic_punct) par = convertTextByTokenSegments(par, stats, convertBasicPlain);
 
     if (options.fix_md_bold_symbols) {
       par = fixMarkdownBoldSymbols(par, stats);
@@ -102,119 +83,19 @@ function splitParagraphsByBlankLines(text: string): string[] {
   return text.split(RE_SPLIT_PAR);
 }
 
-/** ---------- Markdown inline structure split ---------- */
+/** ---------- Token-aware plain conversion ---------- */
 
-function parseMdLinkLikeAt(text: string, start: number): ParsedMdLinkLike | null {
-  let i = start;
-  let isImage = false;
-
-  if (text[i] === "!") {
-    isImage = true;
-    i += 1;
-  }
-  if (i >= text.length || text[i] !== "[") return null;
-
-  const labelStart = i + 1;
-  let j = labelStart;
-  while (j < text.length) {
-    if (text[j] === "\\" && j + 1 < text.length) {
-      j += 2;
-      continue;
-    }
-    if (text[j] === "]") break;
-    j += 1;
-  }
-  if (j >= text.length || text[j] !== "]") return null;
-  if (j + 1 >= text.length || text[j + 1] !== "(") return null;
-
-  const labelEnd = j;
-  const addrStart = j + 2;
-
-  let k = addrStart;
-  let depth = 1;
-  while (k < text.length) {
-    const ch = text[k];
-    if (ch === "\\" && k + 1 < text.length) {
-      k += 2;
-      continue;
-    }
-    if (ch === "(") depth += 1;
-    else if (ch === ")") {
-      depth -= 1;
-      if (depth === 0) {
-        return {
-          start,
-          end: k + 1,
-          labelStart,
-          labelEnd,
-          addrStart,
-          addrEnd: k,
-          isImage,
-        };
-      }
-    }
-    k += 1;
-  }
-
-  return null;
-}
-
-function splitMdInlineSegments(text: string): MdInlineSegment[] {
-  const out: MdInlineSegment[] = [];
-  let i = 0;
-  let last = 0;
-
-  while (i < text.length) {
-    if (text[i] !== "!" && text[i] !== "[") {
-      i += 1;
-      continue;
-    }
-
-    const parsed = parseMdLinkLikeAt(text, i);
-    if (!parsed) {
-      i += 1;
-      continue;
-    }
-
-    if (parsed.start > last) {
-      out.push({ kind: "text", s: text.slice(last, parsed.start) });
-    }
-
-    out.push({
-      kind: "mdlink",
-      isImage: parsed.isImage,
-      label: text.slice(parsed.labelStart, parsed.labelEnd),
-      addr: text.slice(parsed.addrStart, parsed.addrEnd),
-    });
-
-    i = parsed.end;
-    last = parsed.end;
-  }
-
-  if (last < text.length) {
-    out.push({ kind: "text", s: text.slice(last) });
-  }
-
-  return out;
-}
-
-function convertByMdInlineSegments(
+function convertTextByTokenSegments(
   text: string,
   stats: Stats,
   convertPlain: (s: string, stats: Stats) => string,
 ): string {
-  const segs = splitMdInlineSegments(text);
+  const parts = splitByTokens(text);
   const out: string[] = [];
 
-  for (const seg of segs) {
-    if (seg.kind === "text") {
-      out.push(convertPlain(seg.s, stats));
-      continue;
-    }
-
-    const label = convertPlain(seg.label, stats);
-    if (seg.isImage) out.push(`![${label}](${seg.addr})`);
-    else out.push(`[${label}](${seg.addr})`);
+  for (const p of parts) {
+    if (p.kind === "token") out.push(p.s);
+    else out.push(convertPlain(p.s, stats));
   }
 
   return out.join("");
@@ -309,11 +190,7 @@ function collectBoldPairFixesInLine(line: string, stats: Stats): BoldPairFix[] {
     const replacement = normalizeBoldInner(leftOuter, inner, rightOuter, stats);
 
     if (replacement !== line.slice(open, close + 2)) {
-      fixes.push({
-        start: open,
-        end: close + 2,
-        replacement,
-      });
+      fixes.push({ start: open, end: close + 2, replacement });
     }
 
     i = close + 2;

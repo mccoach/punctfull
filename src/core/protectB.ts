@@ -139,16 +139,11 @@ function protectMarkdownLinksAndImages(text: string, stats: Stats, store: TokenS
       continue;
     }
 
-    if (parsed.isImage) {
-      const prefixToken = store.put("![");
-      const suffixToken = store.put(`](${addr})`);
-      out.push(prefixToken + label + suffixToken);
-      stats.protected_B_fragments += 2;
-    } else {
-      const addrToken = store.put(addr);
-      out.push("[" + label + "](" + addrToken + ")");
-      stats.protected_B_fragments += 1;
-    }
+    const leftToken = store.put(parsed.isImage ? "![" : "[");
+    const rightToken = store.put(`](${addr})`);
+
+    out.push(leftToken + label + rightToken);
+    stats.protected_B_fragments += 2;
 
     i = parsed.end;
   }
