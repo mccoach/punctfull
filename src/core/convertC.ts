@@ -28,7 +28,6 @@ export function convertC(text: string, options: Options, stats: Stats): string {
 
     let par = part;
 
-    // 1) Pair-like structures
     if (options.convert_quotes) {
       const r = convertQuotesInParagraph(par, stats);
       par = r.text;
@@ -58,14 +57,11 @@ export function convertC(text: string, options: Options, stats: Stats): string {
       par = fixPairedSymbolsInParagraph(par, stats);
     }
 
-    // 2) Linear punctuation transforms
     if (options.convert_emphasis_punct) par = convertEmphasisPunct(par, stats);
     if (options.convert_ellipsis) par = convertEllipsis(par, stats);
     if (options.convert_dash) par = convertDash(par, stats);
     if (options.convert_basic_punct) par = convertBasic(par, stats);
 
-    // 3) Markdown compatibility fixes should run last,
-    //    so they see the final punctuation shape.
     if (options.fix_md_bold_symbols) {
       par = fixMarkdownBoldSymbols(par, stats);
     }
@@ -106,18 +102,18 @@ type BoldPair = {
   rightOuter: string;
 };
 
-function normalizeBoldInner(inner: string, stats: Stats): string {
+function trimBoldInner(inner: string, stats: Stats): string {
   let out = inner;
 
-  const trimmedLeft = out.replace(/^[ \t]+/, "");
-  if (trimmedLeft !== out) {
-    out = trimmedLeft;
+  const leftTrimmed = out.replace(/^[ \t]+/, "");
+  if (leftTrimmed !== out) {
+    out = leftTrimmed;
     inc(stats, "md_bold_symbol_fix", 1);
   }
 
-  const trimmedRight = out.replace(/[ \t]+$/, "");
-  if (trimmedRight !== out) {
-    out = trimmedRight;
+  const rightTrimmed = out.replace(/[ \t]+$/, "");
+  if (rightTrimmed !== out) {
+    out = rightTrimmed;
     inc(stats, "md_bold_symbol_fix", 1);
   }
 
@@ -125,24 +121,24 @@ function normalizeBoldInner(inner: string, stats: Stats): string {
 }
 
 function normalizeBoldPair(pair: BoldPair, stats: Stats): string {
-  const inner = normalizeBoldInner(pair.inner, stats);
+  const inner = trimBoldInner(pair.inner, stats);
   const firstInner = inner[0] ?? "";
   const lastInner = inner[inner.length - 1] ?? "";
 
-  let prefix = "";
-  let suffix = "";
+  let leftPad = "";
+  let rightPad = "";
 
   if (firstInner && isNonWordLikeForBold(firstInner) && !isNonWordLikeForBold(pair.leftOuter)) {
-    prefix = " ";
+    leftPad = " ";
     inc(stats, "md_bold_symbol_fix", 1);
   }
 
   if (lastInner && isNonWordLikeForBold(lastInner) && !isNonWordLikeForBold(pair.rightOuter)) {
-    suffix = " ";
+    rightPad = " ";
     inc(stats, "md_bold_symbol_fix", 1);
   }
 
-  return prefix + "**" + inner + "**" + suffix;
+  return leftPad + "**" + inner + "**" + rightPad;
 }
 
 function fixMarkdownBoldSymbols(par: string, stats: Stats): string {

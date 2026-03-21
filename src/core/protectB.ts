@@ -43,6 +43,8 @@ function trimFragIfNeeded(name: string, frag: string): string {
 type ParsedMdLink = {
   start: number;
   end: number;
+  labelStart: number;
+  labelEnd: number;
   addrStart: number;
   addrEnd: number;
   isImage: boolean;
@@ -58,8 +60,9 @@ function parseMdLinkAt(text: string, start: number): ParsedMdLink | null {
   }
 
   if (i >= text.length || text[i] !== "[") return null;
+  const labelStart = i + 1;
 
-  let j = i + 1;
+  let j = labelStart;
   while (j < text.length) {
     if (text[j] === "\\" && j + 1 < text.length) {
       j += 2;
@@ -72,6 +75,7 @@ function parseMdLinkAt(text: string, start: number): ParsedMdLink | null {
   if (j >= text.length || text[j] !== "]") return null;
   if (j + 1 >= text.length || text[j + 1] !== "(") return null;
 
+  const labelEnd = j;
   const addrStart = j + 2;
   let k = addrStart;
   let depth = 1;
@@ -89,6 +93,8 @@ function parseMdLinkAt(text: string, start: number): ParsedMdLink | null {
         return {
           start,
           end: k + 1,
+          labelStart,
+          labelEnd,
           addrStart,
           addrEnd: k,
           isImage,
@@ -110,33 +116,25 @@ function protectMarkdownLinksAndImages(text: string, stats: Stats, store: TokenS
   let i = 0;
 
   while (i < text.length) {
-    const ch = text[i];
-
-    if (ch !== "!" && ch !== "[") {
-      out.push(ch);
+    if (text[i] !== "!" && text[i] !== "[") {
+      out.push(text[i]);
       i += 1;
       continue;
     }
 
     const parsed = parseMdLinkAt(text, i);
     if (!parsed) {
-      out.push(ch);
+      out.push(text[i]);
       i += 1;
       continue;
     }
 
     const whole = text.slice(parsed.start, parsed.end);
+    const label = text.slice(parsed.labelStart, parsed.labelEnd);
     const addr = text.slice(parsed.addrStart, parsed.addrEnd);
 
     if (containsTokenMarker(whole)) {
       out.push(whole);
-      i = parsed.end;
-      continue;
-    }
-
-    if (parsed.isImage) {
-      stats.protected_B_fragments += 1;
-      out.push(store.put(whole));
       i = parsed.end;
       continue;
     }
@@ -148,8 +146,14 @@ function protectMarkdownLinksAndImages(text: string, stats: Stats, store: TokenS
     }
 
     stats.protected_B_fragments += 1;
-    const token = store.put(addr);
-    out.push(text.slice(parsed.start, parsed.addrStart) + token + text.slice(parsed.addrEnd, parsed.end));
+    const addrToken = store.put(addr);
+
+    if (parsed.isImage) {
+      out.push("![" + label + "](" + addrToken + ")");
+    } else {
+      out.push("[" + label + "](" + addrToken + ")");
+    }
+
     i = parsed.end;
   }
 
