@@ -46,36 +46,70 @@ html, body {
   flex-direction: column;
 }
 
+/* ===== Top bar: left actions / options center / right actions ===== */
+
 .topbar {
-  padding: 10px 12px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
   display: flex;
+  align-items: center;
   gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
 }
 
-.topbar .group {
+.topbar-left {
   display: flex;
-  gap: 8px;
   align-items: center;
-  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
-label {
-  font-size: 13px;
+.topbar-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
 }
 
-input[type="text"] {
-  width: 380px;
-  max-width: 50vw;
-  padding: 6px 8px;
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ===== Options fieldset ===== */
+
+.options-box {
   border: 1px solid var(--border);
-  background: var(--btn-bg);
-  color: var(--btn-fg);
   border-radius: 6px;
+  padding: 4px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
 }
+
+.options-box legend {
+  font-size: 11px;
+  padding: 0 4px;
+  opacity: 0.7;
+}
+
+.options-box label {
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.options-box input[type="checkbox"] {
+  margin: 0;
+}
+
+/* ===== Buttons sizing by importance ===== */
 
 button {
   padding: 6px 10px;
@@ -84,24 +118,63 @@ button {
   color: var(--btn-fg);
   border-radius: 6px;
   cursor: pointer;
+  font-size: 13px;
 }
 
 button:disabled { opacity: .6; cursor: not-allowed; }
 
-select {
-  padding: 6px 8px;
+button.btn-primary {
+  padding: 7px 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+button.btn-secondary {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+button.btn-small {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* ===== Theme selector (small, right corner) ===== */
+
+.theme-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+}
+
+.theme-group span {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.theme-group select {
+  padding: 3px 6px;
   border: 1px solid var(--border);
   background: var(--btn-bg);
   color: var(--btn-fg);
-  border-radius: 6px;
+  border-radius: 4px;
+  font-size: 11px;
 }
 
-.status {
-  flex: 1;
-  min-width: 260px;
+/* ===== Status bar ===== */
+
+.status-bar {
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
   font-size: 12px;
   opacity: 0.9;
+  min-height: 26px;
+  line-height: 18px;
 }
+
+/* ===== Main editor area ===== */
 
 .main {
   flex: 1;
@@ -133,12 +206,38 @@ select {
   min-height: 0;
 }
 
+/* ===== Footer ===== */
+
 .footer {
   padding: 8px 12px;
   border-top: 1px solid var(--border);
   background: var(--panel);
   font-size: 12px;
   opacity: 0.85;
+}
+
+/* ===== Legacy support (kept for non-layout code) ===== */
+
+label {
+  font-size: 13px;
+}
+
+input[type="text"] {
+  width: 380px;
+  max-width: 50vw;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border-radius: 6px;
+}
+
+select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border-radius: 6px;
 }
 
 /* Monaco decorations */
