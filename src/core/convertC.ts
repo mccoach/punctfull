@@ -28,6 +28,10 @@ export function convertC(text: string, options: Options, stats: Stats): string {
 
     let par = part;
 
+    if (options.fix_md_bold_symbols) {
+      par = fixMarkdownBoldSymbols(par, stats);
+    }
+
     if (options.convert_emphasis_punct) par = convertEmphasisPunct(par, stats);
     if (options.convert_ellipsis) par = convertEllipsis(par, stats);
     if (options.convert_dash) par = convertDash(par, stats);
@@ -75,6 +79,96 @@ export function convertC(text: string, options: Options, stats: Stats): string {
 
 function splitParagraphsByBlankLines(text: string): string[] {
   return text.split(RE_SPLIT_PAR);
+}
+
+/** ---------- Markdown bold symbol fix ---------- */
+
+function isAsciiLetterOrDigit(ch: string): boolean {
+  return !!ch && /[A-Za-z0-9]/.test(ch);
+}
+
+function isHanChar(ch: string): boolean {
+  return !!ch && /[\u4e00-\u9fff]/.test(ch);
+}
+
+function isWordLikeForBoldLeft(ch: string): boolean {
+  return isAsciiLetterOrDigit(ch) || isHanChar(ch);
+}
+
+function isWhitespace(ch: string): boolean {
+  return !!ch && /\s/.test(ch);
+}
+
+function isSymbolLike(ch: string): boolean {
+  if (!ch) return false;
+  if (isWhitespace(ch)) return false;
+  if (isAsciiLetterOrDigit(ch)) return false;
+  if (isHanChar(ch)) return false;
+  return true;
+}
+
+function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
+  if (!par || !par.includes("**")) return par;
+
+  const out: string[] = [];
+  let i = 0;
+  const n = par.length;
+
+  while (i < n) {
+    const open = par.indexOf("**", i);
+    if (open < 0) {
+      out.push(par.slice(i));
+      break;
+    }
+
+    out.push(par.slice(i, open));
+
+    const close = par.indexOf("**", open + 2);
+    if (close < 0) {
+      out.push(par.slice(open));
+      break;
+    }
+
+    const leftNeighbor = open - 1 >= 0 ? par[open - 1] : "";
+    let inner = par.slice(open + 2, close);
+
+    let fixedThisPair = false;
+
+    const trimmedLeft = inner.replace(/^[ \t]+/, "");
+    if (trimmedLeft !== inner) {
+      inner = trimmedLeft;
+      fixedThisPair = true;
+      inc(stats, "md_bold_symbol_fix", 1);
+    }
+
+    const trimmedRight = inner.replace(/[ \t]+$/, "");
+    if (trimmedRight !== inner) {
+      inner = trimmedRight;
+      fixedThisPair = true;
+      inc(stats, "md_bold_symbol_fix", 1);
+    }
+
+    let prefix = "";
+    const firstInner = inner[0] ?? "";
+
+    if (
+      leftNeighbor &&
+      !isWhitespace(leftNeighbor) &&
+      isWordLikeForBoldLeft(leftNeighbor) &&
+      firstInner &&
+      isSymbolLike(firstInner)
+    ) {
+      prefix = " ";
+      fixedThisPair = true;
+      inc(stats, "md_bold_symbol_fix", 1);
+    }
+
+    out.push(prefix + "**" + inner + "**");
+
+    i = close + 2;
+  }
+
+  return out.join("");
 }
 
 /** ---------- Parens semantic ---------- */

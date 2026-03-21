@@ -40,6 +40,7 @@ function getOptionsFromUI(root: HTMLElement): Options {
     convert_parens: q("#opt_parens").checked,
     protect_b_fragments: true,
     fix_paired_symbols: q("#opt_fixpairs").checked,
+    fix_md_bold_symbols: q("#opt_boldsym").checked,
   };
 }
 
@@ -93,6 +94,10 @@ export function initUI(container: HTMLElement) {
 
   <label data-tip="成对符号纠错（强保守，可选）：\n当检测到中文语境，并且段落不像技术文本时，尝试修正一些明显的成对符号错误，例如：\n- ““ → “”\n- ”” → “”\n- 段落内只出现两次同向符号时尝试补成对\n\n这是 legacy 修复器：有可能改到你不想改的地方，所以默认可开可关。">
     <input id="opt_fixpairs" type="checkbox" checked /> 成对符号纠错（保守）
+  </label>
+
+  <label data-tip="修复 Markdown 加粗符号 ** 的兼容性问题：\n1. 去掉 **内容** 两侧内部的非法空格；\n2. 当左 ** 左侧紧邻字母/数字/汉字，且加粗内容首字符是符号时，在左 ** 前补一个空格。\n\n仅处理正文区，代码/链接/表格/公式等保护区不会动。">
+    <input id="opt_boldsym" type="checkbox" checked /> Markdown 加粗符号修复
   </label>
 `;
 

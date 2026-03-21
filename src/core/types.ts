@@ -8,6 +8,7 @@ export type Options = {
 
   protect_b_fragments: boolean;
   fix_paired_symbols: boolean; // legacy conservative fixer
+  fix_md_bold_symbols: boolean;
 };
 
 export type SkipRange = {

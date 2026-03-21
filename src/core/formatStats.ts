@@ -20,7 +20,8 @@ export function formatStats(stats: Stats): string {
     "?->？": "问号（?→？）",
     "!->！": "感叹号（!→！）",
     ":->：": "冒号（:→：）",
-    ".->。": "句号（.→。）"
+    ".->。": "句号（.→。）",
+    "md_bold_symbol_fix": "Markdown 加粗符号修复"
   };
 
   const order = [
@@ -29,7 +30,8 @@ export function formatStats(stats: Stats): string {
     "double_quotes", "single_quotes",
     "parens_converted",
     "exclaim_runs", "question_runs",
-    "?!", "!?"
+    "?!", "!?",
+    "md_bold_symbol_fix"
   ];
 
   const symbolToKey: Record<string, string> = {
