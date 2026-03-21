@@ -99,14 +99,58 @@ function isNonWordLikeForBold(ch: string): boolean {
   return !isWordLikeForBold(ch);
 }
 
+type BoldPair = {
+  leftOuter: string;
+  inner: string;
+  rightOuter: string;
+};
+
+function normalizeBoldInner(inner: string, stats: Stats): string {
+  let out = inner;
+
+  const trimmedLeft = out.replace(/^[ \t]+/, "");
+  if (trimmedLeft !== out) {
+    out = trimmedLeft;
+    inc(stats, "md_bold_symbol_fix", 1);
+  }
+
+  const trimmedRight = out.replace(/[ \t]+$/, "");
+  if (trimmedRight !== out) {
+    out = trimmedRight;
+    inc(stats, "md_bold_symbol_fix", 1);
+  }
+
+  return out;
+}
+
+function normalizeBoldPair(pair: BoldPair, stats: Stats): string {
+  const inner = normalizeBoldInner(pair.inner, stats);
+  const firstInner = inner[0] ?? "";
+  const lastInner = inner[inner.length - 1] ?? "";
+
+  let prefix = "";
+  let suffix = "";
+
+  if (firstInner && isNonWordLikeForBold(firstInner) && !isNonWordLikeForBold(pair.leftOuter)) {
+    prefix = " ";
+    inc(stats, "md_bold_symbol_fix", 1);
+  }
+
+  if (lastInner && isNonWordLikeForBold(lastInner) && !isNonWordLikeForBold(pair.rightOuter)) {
+    suffix = " ";
+    inc(stats, "md_bold_symbol_fix", 1);
+  }
+
+  return prefix + "**" + inner + "**" + suffix;
+}
+
 function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
   if (!par || !par.includes("**")) return par;
 
   const out: string[] = [];
   let i = 0;
-  const n = par.length;
 
-  while (i < n) {
+  while (i < par.length) {
     const open = par.indexOf("**", i);
     if (open < 0) {
       out.push(par.slice(i));
@@ -121,39 +165,13 @@ function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
       break;
     }
 
-    const leftOuter = open - 1 >= 0 ? par[open - 1] : "";
-    const rightOuter = close + 2 < n ? par[close + 2] : "";
-    let inner = par.slice(open + 2, close);
+    const pair: BoldPair = {
+      leftOuter: open > 0 ? par[open - 1] : "",
+      inner: par.slice(open + 2, close),
+      rightOuter: close + 2 < par.length ? par[close + 2] : "",
+    };
 
-    const trimmedLeft = inner.replace(/^[ \t]+/, "");
-    if (trimmedLeft !== inner) {
-      inner = trimmedLeft;
-      inc(stats, "md_bold_symbol_fix", 1);
-    }
-
-    const trimmedRight = inner.replace(/[ \t]+$/, "");
-    if (trimmedRight !== inner) {
-      inner = trimmedRight;
-      inc(stats, "md_bold_symbol_fix", 1);
-    }
-
-    const firstInner = inner[0] ?? "";
-    const lastInner = inner[inner.length - 1] ?? "";
-
-    let prefix = "";
-    let suffix = "";
-
-    if (firstInner && isNonWordLikeForBold(firstInner) && !isNonWordLikeForBold(leftOuter)) {
-      prefix = " ";
-      inc(stats, "md_bold_symbol_fix", 1);
-    }
-
-    if (lastInner && isNonWordLikeForBold(lastInner) && !isNonWordLikeForBold(rightOuter)) {
-      suffix = " ";
-      inc(stats, "md_bold_symbol_fix", 1);
-    }
-
-    out.push(prefix + "**" + inner + "**" + suffix);
+    out.push(normalizeBoldPair(pair, stats));
     i = close + 2;
   }
 
@@ -165,24 +183,30 @@ function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
 function looksTechnicalParenContent(s: string): boolean {
   if (!s) return false;
   if (s.includes("⟦") || s.includes("⟧")) return true;
+
   const techMarks = /[_=<>/*\\]|::|->|=>|\bHTTP\b|\bHTTPS\b|\bx64\b|\bAPI\b/;
   if (techMarks.test(s)) return true;
 
   let ascii = 0;
-  for (const ch of s) if (ch.charCodeAt(0) < 128) ascii += 1;
-  if (ascii / Math.max(1, s.length) > 0.75 && /[A-Za-z0-9]/.test(s))
+  for (const ch of s) {
+    if (ch.charCodeAt(0) < 128) ascii += 1;
+  }
+  if (ascii / Math.max(1, s.length) > 0.75 && /[A-Za-z0-9]/.test(s)) {
     return true;
+  }
 
   return false;
 }
 
 function looksChineseExplanatory(s: string): boolean {
   if (!s) return false;
+
   let zh = 0;
   for (const ch of s) {
     const code = ch.charCodeAt(0);
     if (code >= 0x4e00 && code <= 0x9fff) zh += 1;
   }
+
   if (zh === 0) return false;
   return zh / Math.max(1, s.length) >= 0.35 && s.length <= 30;
 }
@@ -190,9 +214,8 @@ function looksChineseExplanatory(s: string): boolean {
 function convertParensSemantic(text: string, stats: Stats): string {
   const out: string[] = [];
   let i = 0;
-  const n = text.length;
 
-  while (i < n) {
+  while (i < text.length) {
     if (text[i] !== "(") {
       out.push(text[i]);
       i += 1;
@@ -206,12 +229,12 @@ function convertParensSemantic(text: string, stats: Stats): string {
     }
 
     let j = i + 1;
-    while (j < n && text[j] !== ")" && text[j] !== "\n") {
+    while (j < text.length && text[j] !== ")" && text[j] !== "\n") {
       if (text[j] === "⟦") break;
       j += 1;
     }
 
-    if (j < n && text[j] === ")") {
+    if (j < text.length && text[j] === ")") {
       const inside = text.slice(i + 1, j);
       if (looksTechnicalParenContent(inside)) {
         out.push(text.slice(i, j + 1));
@@ -235,6 +258,7 @@ function convertParensSemantic(text: string, stats: Stats): string {
 /** ---------- Token split helper ---------- */
 
 type SegPart = { kind: "text"; s: string } | { kind: "token"; s: string };
+type LocalSkip = { start: number; end: number; reason: string };
 
 function splitByTokens(par: string): SegPart[] {
   const parts: SegPart[] = [];
@@ -245,10 +269,12 @@ function splitByTokens(par: string): SegPart[] {
     const s = m.index ?? 0;
     const tok = m[0];
     const e = s + tok.length;
+
     if (s > last) parts.push({ kind: "text", s: par.slice(last, s) });
     parts.push({ kind: "token", s: tok });
     last = e;
   }
+
   if (last < par.length) parts.push({ kind: "text", s: par.slice(last) });
   return parts;
 }
@@ -267,30 +293,27 @@ function collectPositions(
 
 /** ---------- Quotes conversion with odd fallback ---------- */
 
-type LocalSkip = { start: number; end: number; reason: string };
-
 function collectDoubleQuoteCandidates(seg: string, gate: (pos: number) => boolean): number[] {
   return collectPositions(seg, `"`, gate);
 }
 
 function collectApostrophePositions(seg: string): Set<number> {
   const apost = new Set<number>();
+
   for (let i = 0; i < seg.length - 2; i++) {
     const a = seg[i];
     const b = seg[i + 1];
     const c = seg[i + 2];
+
     if (/[A-Za-z]/.test(a) && b === "'" && /[A-Za-z]/.test(c)) {
       apost.add(i + 1);
     }
   }
+
   return apost;
 }
 
-function collectSingleQuoteCandidates(
-  seg: string,
-  gate: (pos: number) => boolean,
-  quoteBoundary: ReadonlySet<string>,
-): number[] {
+function collectSingleQuoteCandidates(seg: string, gate: (pos: number) => boolean): number[] {
   const apost = collectApostrophePositions(seg);
   const candidates: number[] = [];
 
@@ -298,17 +321,7 @@ function collectSingleQuoteCandidates(
     if (seg[p] !== "'") continue;
     if (apost.has(p)) continue;
     if (!gate(p)) continue;
-
-    const prevc = p - 1 >= 0 ? seg[p - 1] : "";
-    const nextc = p + 1 < seg.length ? seg[p + 1] : "";
-    if (
-      prevc === "" ||
-      quoteBoundary.has(prevc) ||
-      nextc === "" ||
-      quoteBoundary.has(nextc)
-    ) {
-      candidates.push(p);
-    }
+    candidates.push(p);
   }
 
   return candidates;
@@ -330,6 +343,7 @@ function markOddFallback(
       reason,
     });
   }
+
   return skipped;
 }
 
@@ -356,15 +370,6 @@ function convertQuotesInParagraph(
   const parts = splitByTokens(par);
   const localSkips: LocalSkip[] = [];
 
-  const QUOTE_BOUNDARY = new Set<string>([
-    ..." \t\r\n",
-    ..."([{<",
-    ...")]}>",
-    ..."，。；：？！、",
-    ...',"-',
-    ..."“”‘’",
-  ]);
-
   function convertSegment(seg: string, segStart: number): string {
     const gate = (pos: number) => shouldConvertAt(seg, pos);
 
@@ -379,14 +384,14 @@ function convertQuotesInParagraph(
       stats.skipped_quote_paragraphs_double += 1;
     }
 
-    const sqCandidates = collectSingleQuoteCandidates(seg, gate, QUOTE_BOUNDARY);
+    const sqPos = collectSingleQuoteCandidates(seg, gate);
     const sqSkip = markOddFallback(
-      sqCandidates,
+      sqPos,
       segStart,
       "奇数回退：单引号不成对，跳过该符号",
       localSkips,
     );
-    if (sqCandidates.length && sqSkip.size > 0) {
+    if (sqPos.length && sqSkip.size > 0) {
       stats.skipped_quote_paragraphs_single += 1;
     }
 
@@ -396,8 +401,8 @@ function convertQuotesInParagraph(
       applyAlternatingQuotes(chars, dqPos, "“", "”", stats, "double_quotes");
     }
 
-    if (sqCandidates.length && sqSkip.size === 0) {
-      applyAlternatingQuotes(chars, sqCandidates, "‘", "’", stats, "single_quotes");
+    if (sqPos.length && sqSkip.size === 0) {
+      applyAlternatingQuotes(chars, sqPos, "‘", "’", stats, "single_quotes");
     }
 
     return chars.join("");
@@ -478,39 +483,30 @@ function convertEllipsis(text: string, stats: Stats): string {
   });
 }
 
+function convertEmphasisRun(run: string): string {
+  let out = "";
+  for (const ch of run) {
+    out += ch === "!" ? "！" : ch === "?" ? "？" : ch;
+  }
+  return out;
+}
+
 function convertEmphasisPunct(text: string, stats: Stats): string {
-  {
-    const snap = text;
-    text = text.replace(/!{3,}/g, (m, offset) => {
-      if (!shouldConvertAt(snap, Number(offset))) return m;
-      inc(stats, "exclaim_runs", 1);
-      return "！".repeat(m.length);
-    });
-  }
+  const snap = text;
 
-  {
-    const snap = text;
-    text = text.replace(/\?{3,}/g, (m, offset) => {
-      if (!shouldConvertAt(snap, Number(offset))) return m;
-      inc(stats, "question_runs", 1);
-      return "？".repeat(m.length);
-    });
-  }
+  return text.replace(/[!?]{2,}/g, (m, offset) => {
+    if (!shouldConvertAt(snap, Number(offset))) return m;
 
-  {
-    const snap = text;
-    text = text.replace(/(\?!|!\?)/g, (m, offset) => {
-      if (!shouldConvertAt(snap, Number(offset))) return m;
-      if (m === "?!") {
-        inc(stats, "?!", 1);
-        return "？！";
-      }
-      inc(stats, "!?", 1);
-      return "！？";
-    });
-  }
+    const out = convertEmphasisRun(m);
+    if (out === m) return m;
 
-  return text;
+    if (/!{3,}/.test(m)) inc(stats, "exclaim_runs", 1);
+    if (/\?{3,}/.test(m)) inc(stats, "question_runs", 1);
+    if (m.includes("?!")) inc(stats, "?!", 1);
+    if (m.includes("!?")) inc(stats, "!?", 1);
+
+    return out;
+  });
 }
 
 function convertDash(text: string, stats: Stats): string {
@@ -585,6 +581,7 @@ function replaceChar(
   repl: (idx: number) => string | null,
 ): string {
   const out: string[] = [];
+
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (ch === target) {
@@ -594,5 +591,6 @@ function replaceChar(
       out.push(ch);
     }
   }
+
   return out.join("");
 }

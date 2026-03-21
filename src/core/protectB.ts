@@ -1,9 +1,7 @@
 import type { Stats } from "./types";
 import { TokenStore } from "./tokenStore";
-import { TOKEN_RE_ANY } from "./tokens";
 import { hasAnyTokenInRange } from "./tokenUtils";
 
-// 与 Python 保持一致的右侧裁剪字符集合
 const TRIM_CHARS = `.,;:!?)}]>\'"”’，。；：？！】）》）`;
 const TRIM_RE = new RegExp(`[${escapeForCharClass(TRIM_CHARS)}]+$`);
 
@@ -23,12 +21,14 @@ function isValidUrl(s: string): boolean {
 function isValidIpv4(s: string): boolean {
   const parts = s.split(".");
   if (parts.length !== 4) return false;
+
   for (const p of parts) {
     if (p === "" || p.length > 3) return false;
     if (!/^\d+$/.test(p)) return false;
     const v = Number(p);
     if (!Number.isInteger(v) || v < 0 || v > 255) return false;
   }
+
   return true;
 }
 
@@ -40,45 +40,65 @@ function trimFragIfNeeded(name: string, frag: string): string {
   return frag;
 }
 
-/**
- * Parse !?[...](...) and return (start, end, addrStart, addrEnd, isImage), else null.
- */
-function parseMdLinkAt(text: string, i: number):
-  | { start: number; end: number; addrStart: number; addrEnd: number; isImage: boolean }
-  | null {
-  const n = text.length;
-  const start = i;
+type ParsedMdLink = {
+  start: number;
+  end: number;
+  labelStart: number;
+  labelEnd: number;
+  addrStart: number;
+  addrEnd: number;
+  isImage: boolean;
+};
 
+function parseMdLinkAt(text: string, start: number): ParsedMdLink | null {
+  let i = start;
   let isImage = false;
-  if (i < n && text[i] === "!") {
+
+  if (text[i] === "!") {
     isImage = true;
     i += 1;
   }
-  if (i >= n || text[i] !== "[") return null;
 
-  let j = i + 1;
-  while (j < n) {
-    if (text[j] === "\\" && j + 1 < n) { j += 2; continue; }
+  if (text[i] !== "[") return null;
+  const labelStart = i + 1;
+
+  let j = labelStart;
+  while (j < text.length) {
+    if (text[j] === "\\" && j + 1 < text.length) {
+      j += 2;
+      continue;
+    }
     if (text[j] === "]") break;
     j += 1;
   }
-  if (j >= n || text[j] !== "]") return null;
-  if (j + 1 >= n || text[j + 1] !== "(") return null;
 
+  if (j >= text.length || text[j] !== "]") return null;
+  if (j + 1 >= text.length || text[j + 1] !== "(") return null;
+
+  const labelEnd = j;
   const addrStart = j + 2;
+
   let k = addrStart;
   let depth = 1;
-
-  while (k < n) {
+  while (k < text.length) {
     const ch = text[k];
-    if (ch === "\\" && k + 1 < n) { k += 2; continue; }
+    if (ch === "\\" && k + 1 < text.length) {
+      k += 2;
+      continue;
+    }
     if (ch === "(") depth += 1;
     else if (ch === ")") {
       depth -= 1;
       if (depth === 0) {
-        const addrEnd = k;
-        const end = k + 1;
-        return { start, end, addrStart, addrEnd, isImage };
+        return {
+          start,
+          end: k + 1,
+          labelStart,
+          labelEnd,
+          addrStart,
+          addrEnd: k,
+          isImage,
+        };
       }
     }
     k += 1;
@@ -87,66 +107,59 @@ function parseMdLinkAt(text: string, i: number):
   return null;
 }
 
-function containsAnyTokenMarker(s: string): boolean {
-  return s.includes("⟦") || s.includes("⟧") || /⟦[ATB]\d+⟧/.test(s);
+function containsTokenMarker(s: string): boolean {
+  return s.includes("⟦") || s.includes("⟧");
 }
 
 function protectMarkdownLinksAndImages(text: string, stats: Stats, store: TokenStore): string {
   const out: string[] = [];
   let i = 0;
+  let last = 0;
 
   while (i < text.length) {
-    if (text[i] !== "!" && text[i] !== "[") {
-      out.push(text[i]);
+    if (text[i] !== "[" && text[i] !== "!") {
       i += 1;
       continue;
     }
 
     const parsed = parseMdLinkAt(text, i);
     if (!parsed) {
-      out.push(text[i]);
       i += 1;
       continue;
     }
 
-    const { start, end, addrStart, addrEnd, isImage } = parsed;
-    if (start > i) out.push(text.slice(i, start));
+    out.push(text.slice(last, parsed.start));
 
-    const whole = text.slice(start, end);
-    const addr = text.slice(addrStart, addrEnd);
+    const whole = text.slice(parsed.start, parsed.end);
+    const addr = text.slice(parsed.addrStart, parsed.addrEnd);
 
-    if (containsAnyTokenMarker(whole)) {
+    if (containsTokenMarker(whole)) {
       out.push(whole);
-      i = end;
-      continue;
-    }
-
-    if (isImage) {
+    } else if (parsed.isImage) {
       stats.protected_B_fragments += 1;
       out.push(store.put(whole));
-      i = end;
-      continue;
-    }
-
-    if (containsAnyTokenMarker(addr)) {
+    } else if (containsTokenMarker(addr)) {
       out.push(whole);
-      i = end;
-      continue;
+    } else {
+      stats.protected_B_fragments += 1;
+      const token = store.put(addr);
+      out.push(
+        text.slice(parsed.start, parsed.addrStart) +
+        token +
+        text.slice(parsed.addrEnd, parsed.end),
+      );
     }
 
-    stats.protected_B_fragments += 1;
-    const token = store.put(addr);
-    out.push(text.slice(start, addrStart) + token + text.slice(addrEnd, end));
-    i = end;
+    i = parsed.end;
+    last = parsed.end;
   }
 
+  out.push(text.slice(last));
   return out.join("");
 }
 
-/**
- * PATH (no lookbehind) — compatibility-first.
- */
-const RE_PATH_BROAD = /(?:\.\/|\.\.\/|~\/|[A-Za-z]:\\)[^\s<>()\]]+|[A-Za-z0-9._~\-]+(?:[\\/][A-Za-z0-9._~\-]+)+/g;
+const RE_PATH_BROAD =
+  /(?:\.\/|\.\.\/|~\/|[A-Za-z]:\\)[^\s<>()\]]+|[A-Za-z0-9._~\-]+(?:[\\/][A-Za-z0-9._~\-]+)+/g;
 
 const PATTERNS: Array<[string, RegExp]> = [
   ["URL", /https?:\/\/[^\s<>()\]]+/g],
@@ -173,12 +186,11 @@ function isBoundaryBefore(text: string, idx: number): boolean {
 }
 
 function isForbiddenPathFraction(text: string, start: number, end: number): boolean {
-  const frag = text.slice(start, end);
-  return /^\d+\/\d+\b/.test(frag);
+  return /^\d+\/\d+\b/.test(text.slice(start, end));
 }
 
 function isPatternMatchAllowed(name: string, text: string, start: number, end: number, frag: string): boolean {
-  if (frag.includes("⟦") || frag.includes("⟧")) return false;
+  if (containsTokenMarker(frag)) return false;
   if (hasAnyTokenInRange(text, start, end)) return false;
 
   if (name === "PATH") {
