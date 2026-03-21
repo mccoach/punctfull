@@ -133,19 +133,21 @@ function protectMarkdownLinksAndImages(text: string, stats: Stats, store: TokenS
     const label = text.slice(parsed.labelStart, parsed.labelEnd);
     const addr = text.slice(parsed.addrStart, parsed.addrEnd);
 
-    if (containsTokenMarker(whole) || containsTokenMarker(addr)) {
+    if (containsTokenMarker(whole) || containsTokenMarker(label) || containsTokenMarker(addr)) {
       out.push(whole);
       i = parsed.end;
       continue;
     }
 
-    stats.protected_B_fragments += 1;
-
     if (parsed.isImage) {
-      out.push(store.put(whole));
+      const prefixToken = store.put("![");
+      const suffixToken = store.put(`](${addr})`);
+      out.push(prefixToken + label + suffixToken);
+      stats.protected_B_fragments += 2;
     } else {
       const addrToken = store.put(addr);
       out.push("[" + label + "](" + addrToken + ")");
+      stats.protected_B_fragments += 1;
     }
 
     i = parsed.end;

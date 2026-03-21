@@ -20,8 +20,7 @@ type SegPart = { kind: "text"; s: string } | { kind: "token"; s: string };
 
 type MdInlineSegment =
   | { kind: "text"; s: string }
-  | { kind: "mdlink"; label: string; addr: string }
-  | { kind: "mdimage"; label: string; addr: string };
+  | { kind: "mdlink"; isImage: boolean; label: string; addr: string };
 
 type ParsedMdLinkLike = {
   start: number;
@@ -181,14 +180,12 @@ function splitMdInlineSegments(text: string): MdInlineSegment[] {
       out.push({ kind: "text", s: text.slice(last, parsed.start) });
     }
 
-    const label = text.slice(parsed.labelStart, parsed.labelEnd);
-    const addr = text.slice(parsed.addrStart, parsed.addrEnd);
-
-    if (parsed.isImage) {
-      out.push({ kind: "mdimage", label, addr });
-    } else {
-      out.push({ kind: "mdlink", label, addr });
-    }
+    out.push({
+      kind: "mdlink",
+      isImage: parsed.isImage,
+      label: text.slice(parsed.labelStart, parsed.labelEnd),
+      addr: text.slice(parsed.addrStart, parsed.addrEnd),
+    });
 
     i = parsed.end;
     last = parsed.end;
@@ -215,14 +212,9 @@ function convertByMdInlineSegments(
       continue;
     }
 
-    if (seg.kind === "mdlink") {
-      const label = convertPlain(seg.label, stats);
-      out.push(`[${label}](${seg.addr})`);
-      continue;
-    }
-
     const label = convertPlain(seg.label, stats);
-    out.push(`![${label}](${seg.addr})`);
+    if (seg.isImage) out.push(`![${label}](${seg.addr})`);
+    else out.push(`[${label}](${seg.addr})`);
   }
 
   return out.join("");
