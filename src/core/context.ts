@@ -13,6 +13,7 @@ const CN_CONTEXT_CHARS = new Set<string>([
 
 const MD_NOISE_CHARS = new Set<string>([..."*_~"]);
 const TRANSPARENT_CHARS = new Set<string>([..."'\"`", ...MD_NOISE_CHARS]);
+const ASCII_PUNCT_CHAIN_CHARS = new Set<string>([...",.;:?!()[]{}<>/\\-+|"]);
 const MAX_CONTEXT_LOOK = 24;
 
 export function isCjkLetter(ch: string): boolean {
@@ -32,6 +33,10 @@ export function isFormatNoise(ch: string): boolean {
   return !!ch && (TRANSPARENT_CHARS.has(ch) || RE_WS.test(ch));
 }
 
+function isAsciiPunctChainChar(ch: string): boolean {
+  return !!ch && ASCII_PUNCT_CHAIN_CHARS.has(ch);
+}
+
 function scanSemanticNeighbor(
   text: string,
   start: number,
@@ -43,11 +48,15 @@ function scanSemanticNeighbor(
 
   while (i >= 0 && i < text.length && steps < maxSteps) {
     const ch = text[i];
-    if (isSemanticCjk(ch)) return ch;
-    if (!isFormatNoise(ch)) return null;
 
-    i += direction;
-    steps += 1;
+    if (isSemanticCjk(ch)) return ch;
+    if (isFormatNoise(ch) || isAsciiPunctChainChar(ch)) {
+      i += direction;
+      steps += 1;
+      continue;
+    }
+
+    return null;
   }
 
   return null;
@@ -55,6 +64,8 @@ function scanSemanticNeighbor(
 
 /**
  * Only convert when there is nearby Chinese-like semantic context.
+ * Allows whitespace / markdown noise / ASCII punctuation chains between
+ * the target punctuation and nearby Chinese semantic characters.
  */
 export function shouldConvertAt(text: string, idx: number): boolean {
   return (

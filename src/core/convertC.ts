@@ -13,6 +13,7 @@ const BASIC_MAP: Record<string, string> = {
 };
 
 const RE_SPLIT_PAR = /(\n[ \t]*\n+)/;
+const RE_LINE_WITH_END = /.*(?:\r?\n|$)/g;
 
 type LocalSkip = { start: number; end: number; reason: string };
 type SegPart = { kind: "text"; s: string } | { kind: "token"; s: string };
@@ -20,12 +21,6 @@ type SegPart = { kind: "text"; s: string } | { kind: "token"; s: string };
 type MdInlineSegment =
   | { kind: "text"; s: string }
   | { kind: "mdlink"; isImage: boolean; label: string; addr: string };
-
-type BoldPair = {
-  leftOuter: string;
-  inner: string;
-  rightOuter: string;
-};
 
 type ParsedMdLinkLike = {
   start: number;
@@ -37,20 +32,11 @@ type ParsedMdLinkLike = {
   isImage: boolean;
 };
 
-const DEBUG_PF = true;
-
-function dbg(scope: string, message: string, extra?: unknown) {
-  if (!DEBUG_PF) return;
-  if (extra === undefined) {
-    console.log(`[PFDBG:${scope}] ${message}`);
-  } else {
-    console.log(`[PFDBG:${scope}] ${message}`, extra);
-  }
-}
-
-function previewText(s: string, max = 120): string {
-  return s.length <= max ? s : s.slice(0, max) + " ...(truncated)";
-}
+type BoldPairFix = {
+  start: number;
+  end: number;
+  replacement: string;
+};
 
 export function convertC(text: string, options: Options, stats: Stats): string {
   const parts = splitParagraphsByBlankLines(text);
@@ -194,21 +180,11 @@ function splitMdInlineSegments(text: string): MdInlineSegment[] {
       out.push({ kind: "text", s: text.slice(last, parsed.start) });
     }
 
-    const label = text.slice(parsed.labelStart, parsed.labelEnd);
-    const addr = text.slice(parsed.addrStart, parsed.addrEnd);
-
-    dbg("LINK", "splitMdInlineSegments detected mdlink/image", {
-      isImage: parsed.isImage,
-      raw: text.slice(parsed.start, parsed.end),
-      label,
-      addr,
-    });
-
     out.push({
       kind: "mdlink",
       isImage: parsed.isImage,
-      label,
-      addr,
+      label: text.slice(parsed.labelStart, parsed.labelEnd),
+      addr: text.slice(parsed.addrStart, parsed.addrEnd),
     });
 
     i = parsed.end;
@@ -236,26 +212,7 @@ function convertByMdInlineSegments(
       continue;
     }
 
-    const beforeLabel = seg.label;
-    const label = convertPlain(seg.label, stats);
-
-    if (beforeLabel !== label) {
-      dbg("LINK", "label changed by convertPlain", {
-        isImage: seg.isImage,
-        before: beforeLabel,
-        after: label,
-        addr: seg.addr,
-        convertPlain: convertPlain.name || "(anonymous)",
-      });
-    } else if (/[,:;?!]|\.{3,}|--|[!?]{2,}/.test(beforeLabel)) {
-      dbg("LINK", "label passed convertPlain but unchanged", {
-        isImage: seg.isImage,
-        label: beforeLabel,
-        addr: seg.addr,
-        convertPlain: convertPlain.name || "(anonymous)",
-      });
-    }
-
+    const label = seg.isImage ? seg.label : convertPlain(seg.label, stats);
     if (seg.isImage) out.push(`![${label}](${seg.addr})`);
     else out.push(`[${label}](${seg.addr})`);
   }
@@ -287,20 +244,12 @@ function trimBoldInner(inner: string, stats: Stats): string {
 
   const leftTrimmed = out.replace(/^[ \t]+/, "");
   if (leftTrimmed !== out) {
-    dbg("BOLD", "trim left inner spaces", {
-      before: inner,
-      after: leftTrimmed,
-    });
     out = leftTrimmed;
     inc(stats, "md_bold_symbol_fix", 1);
   }
 
   const rightTrimmed = out.replace(/[ \t]+$/, "");
   if (rightTrimmed !== out) {
-    dbg("BOLD", "trim right inner spaces", {
-      before: out,
-      after: rightTrimmed,
-    });
     out = rightTrimmed;
     inc(stats, "md_bold_symbol_fix", 1);
   }
@@ -308,116 +257,104 @@ function trimBoldInner(inner: string, stats: Stats): string {
   return out;
 }
 
-function normalizeBoldPair(pair: BoldPair, stats: Stats): { leftPad: string; core: string; rightPad: string } {
-  const inner = trimBoldInner(pair.inner, stats);
-  const firstInner = inner[0] ?? "";
-  const lastInner = inner[inner.length - 1] ?? "";
+function normalizeBoldInner(
+  leftOuter: string,
+  inner: string,
+  rightOuter: string,
+  stats: Stats,
+): string {
+  const trimmed = trimBoldInner(inner, stats);
+  const firstInner = trimmed[0] ?? "";
+  const lastInner = trimmed[trimmed.length - 1] ?? "";
 
   const needLeftPad =
     !!firstInner &&
     isNonWordLikeForBold(firstInner) &&
-    !isNonWordLikeForBold(pair.leftOuter);
+    !isNonWordLikeForBold(leftOuter);
 
   const needRightPad =
     !!lastInner &&
     isNonWordLikeForBold(lastInner) &&
-    !isNonWordLikeForBold(pair.rightOuter);
-
-  dbg("BOLD", "normalizeBoldPair decision", {
-    pair,
-    trimmedInner: inner,
-    firstInner,
-    lastInner,
-    leftOuter: pair.leftOuter,
-    rightOuter: pair.rightOuter,
-    leftOuterIsNonWord: isNonWordLikeForBold(pair.leftOuter),
-    rightOuterIsNonWord: isNonWordLikeForBold(pair.rightOuter),
-    firstInnerIsNonWord: isNonWordLikeForBold(firstInner),
-    lastInnerIsNonWord: isNonWordLikeForBold(lastInner),
-    needLeftPad,
-    needRightPad,
-  });
+    !isNonWordLikeForBold(rightOuter);
 
   if (needLeftPad) inc(stats, "md_bold_symbol_fix", 1);
   if (needRightPad) inc(stats, "md_bold_symbol_fix", 1);
 
-  return {
-    leftPad: needLeftPad ? " " : "",
-    core: `**${inner}**`,
-    rightPad: needRightPad ? " " : "",
-  };
+  return `${needLeftPad ? " " : ""}**${trimmed}**${needRightPad ? " " : ""}`;
+}
+
+function hasLineBreak(s: string): boolean {
+  return s.includes("\n") || s.includes("\r");
+}
+
+function collectBoldPairFixesInLine(line: string, stats: Stats): BoldPairFix[] {
+  const fixes: BoldPairFix[] = [];
+  let i = 0;
+
+  while (i < line.length - 1) {
+    const open = line.indexOf("**", i);
+    if (open < 0) break;
+
+    const close = line.indexOf("**", open + 2);
+    if (close < 0) break;
+
+    const inner = line.slice(open + 2, close);
+    if (inner.length === 0 || hasLineBreak(inner)) {
+      i = open + 2;
+      continue;
+    }
+
+    const leftOuter = open > 0 ? line[open - 1] : "";
+    const rightOuter = close + 2 < line.length ? line[close + 2] : "";
+    const replacement = normalizeBoldInner(leftOuter, inner, rightOuter, stats);
+
+    if (replacement !== line.slice(open, close + 2)) {
+      fixes.push({
+        start: open,
+        end: close + 2,
+        replacement,
+      });
+    }
+
+    i = close + 2;
+  }
+
+  return fixes;
+}
+
+function applyBoldPairFixes(line: string, fixes: BoldPairFix[]): string {
+  if (!fixes.length) return line;
+
+  const out: string[] = [];
+  let last = 0;
+
+  for (const fix of fixes) {
+    out.push(line.slice(last, fix.start));
+    out.push(fix.replacement);
+    last = fix.end;
+  }
+
+  out.push(line.slice(last));
+  return out.join("");
 }
 
 function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
   if (!par || !par.includes("**")) return par;
 
+  const lines = par.match(RE_LINE_WITH_END) ?? [par];
   const out: string[] = [];
-  let cursor = 0;
 
-  dbg("BOLD", "start paragraph", { paragraph: previewText(par, 240) });
-
-  while (cursor < par.length) {
-    const open = par.indexOf("**", cursor);
-    if (open < 0) {
-      out.push(par.slice(cursor));
-      break;
+  for (const line of lines) {
+    if (!line.includes("**")) {
+      out.push(line);
+      continue;
     }
 
-    const close = par.indexOf("**", open + 2);
-    if (close < 0) {
-      out.push(par.slice(cursor));
-      break;
-    }
-
-    const before = par.slice(cursor, open);
-    const pair: BoldPair = {
-      leftOuter: open > 0 ? par[open - 1] : "",
-      inner: par.slice(open + 2, close),
-      rightOuter: close + 2 < par.length ? par[close + 2] : "",
-    };
-
-    dbg("BOLD", "found bold pair", {
-      cursor,
-      open,
-      close,
-      beforeTail: before.slice(Math.max(0, before.length - 20)),
-      leftOuter: pair.leftOuter,
-      inner: pair.inner,
-      rightOuter: pair.rightOuter,
-      raw: par.slice(open, close + 2),
-    });
-
-    const normalized = normalizeBoldPair(pair, stats);
-
-    dbg("BOLD", "apply normalized result", {
-      raw: par.slice(open, close + 2),
-      result: normalized.leftPad + normalized.core + normalized.rightPad,
-      leftPad: normalized.leftPad,
-      core: normalized.core,
-      rightPad: normalized.rightPad,
-    });
-
-    out.push(before);
-    out.push(normalized.leftPad);
-    out.push(normalized.core);
-    out.push(normalized.rightPad);
-
-    cursor = close + 2;
+    const fixes = collectBoldPairFixesInLine(line, stats);
+    out.push(applyBoldPairFixes(line, fixes));
   }
 
-  const result = out.join("");
-  if (result !== par) {
-    dbg("BOLD", "paragraph changed", {
-      before: previewText(par, 240),
-      after: previewText(result, 240),
-    });
-  } else {
-    dbg("BOLD", "paragraph unchanged", {
-      paragraph: previewText(par, 240),
-    });
-  }
-
-  return result;
+  return out.join("");
 }
 
 /** ---------- Parens semantic ---------- */
@@ -630,7 +567,7 @@ function convertQuotesInParagraph(
       "奇数回退：单引号不成对，跳过该符号",
       localSkips,
     );
-    if (sqPos.length && sqSkip.size > 0) {
+    if (sqPos.length && dqSkip.size > 0) {
       stats.skipped_quote_paragraphs_single += 1;
     }
 
@@ -739,17 +676,10 @@ function convertEmphasisPunctPlain(text: string, stats: Stats): string {
     const out = convertEmphasisRun(m);
     if (out === m) return m;
 
-    if (/\!{3,}/.test(m)) inc(stats, "exclaim_runs", 1);
+    if (/!{3,}/.test(m)) inc(stats, "exclaim_runs", 1);
     if (/\?{3,}/.test(m)) inc(stats, "question_runs", 1);
     if (m.includes("?!")) inc(stats, "?!", 1);
     if (m.includes("!?")) inc(stats, "!?", 1);
-
-    dbg("LINK", "convertEmphasisPunctPlain replaced run", {
-      before: m,
-      after: out,
-      offset: Number(offset),
-      textPreview: previewText(text, 160),
-    });
 
     return out;
   });
@@ -811,15 +741,6 @@ function convertBasicPlain(text: string, stats: Stats): string {
 
       inc(stats, `${ch}->${mapped}`, 1);
       out += mapped;
-    }
-
-    if (m !== out) {
-      dbg("LINK", "convertBasicPlain replaced run", {
-        before: m,
-        after: out,
-        offset: base,
-        textPreview: previewText(text, 160),
-      });
     }
 
     return out;
