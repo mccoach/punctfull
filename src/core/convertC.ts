@@ -7,11 +7,35 @@ import { fixPairedSymbolsInParagraph } from "./fixPairs";
 const BASIC_MAP: Record<string, string> = {
   ",": "，",
   ";": "；",
+  ":": "：",
   "?": "？",
   "!": "！",
 };
 
 const RE_SPLIT_PAR = /(\n[ \t]*\n+)/;
+
+type LocalSkip = { start: number; end: number; reason: string };
+type SegPart = { kind: "text"; s: string } | { kind: "token"; s: string };
+
+type MdInlineSegment =
+  | { kind: "text"; s: string }
+  | { kind: "mdlink"; isImage: boolean; label: string; addr: string };
+
+type BoldPair = {
+  leftOuter: string;
+  inner: string;
+  rightOuter: string;
+};
+
+type ParsedMdLinkLike = {
+  start: number;
+  end: number;
+  labelStart: number;
+  labelEnd: number;
+  addrStart: number;
+  addrEnd: number;
+  isImage: boolean;
+};
 
 export function convertC(text: string, options: Options, stats: Stats): string {
   const parts = splitParagraphsByBlankLines(text);
@@ -57,10 +81,10 @@ export function convertC(text: string, options: Options, stats: Stats): string {
       par = fixPairedSymbolsInParagraph(par, stats);
     }
 
-    if (options.convert_emphasis_punct) par = convertEmphasisPunct(par, stats);
-    if (options.convert_ellipsis) par = convertEllipsis(par, stats);
-    if (options.convert_dash) par = convertDash(par, stats);
-    if (options.convert_basic_punct) par = convertBasic(par, stats);
+    if (options.convert_emphasis_punct) par = convertByMdInlineSegments(par, stats, convertEmphasisPunctPlain);
+    if (options.convert_ellipsis) par = convertByMdInlineSegments(par, stats, convertEllipsisPlain);
+    if (options.convert_dash) par = convertByMdInlineSegments(par, stats, convertDashPlain);
+    if (options.convert_basic_punct) par = convertByMdInlineSegments(par, stats, convertBasicPlain);
 
     if (options.fix_md_bold_symbols) {
       par = fixMarkdownBoldSymbols(par, stats);
@@ -75,6 +99,124 @@ export function convertC(text: string, options: Options, stats: Stats): string {
 
 function splitParagraphsByBlankLines(text: string): string[] {
   return text.split(RE_SPLIT_PAR);
+}
+
+/** ---------- Markdown inline structure split ---------- */
+
+function parseMdLinkLikeAt(text: string, start: number): ParsedMdLinkLike | null {
+  let i = start;
+  let isImage = false;
+
+  if (text[i] === "!") {
+    isImage = true;
+    i += 1;
+  }
+  if (i >= text.length || text[i] !== "[") return null;
+
+  const labelStart = i + 1;
+  let j = labelStart;
+  while (j < text.length) {
+    if (text[j] === "\\" && j + 1 < text.length) {
+      j += 2;
+      continue;
+    }
+    if (text[j] === "]") break;
+    j += 1;
+  }
+  if (j >= text.length || text[j] !== "]") return null;
+  if (j + 1 >= text.length || text[j + 1] !== "(") return null;
+
+  const labelEnd = j;
+  const addrStart = j + 2;
+
+  let k = addrStart;
+  let depth = 1;
+  while (k < text.length) {
+    const ch = text[k];
+    if (ch === "\\" && k + 1 < text.length) {
+      k += 2;
+      continue;
+    }
+    if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        return {
+          start,
+          end: k + 1,
+          labelStart,
+          labelEnd,
+          addrStart,
+          addrEnd: k,
+          isImage,
+        };
+      }
+    }
+    k += 1;
+  }
+
+  return null;
+}
+
+function splitMdInlineSegments(text: string): MdInlineSegment[] {
+  const out: MdInlineSegment[] = [];
+  let i = 0;
+  let last = 0;
+
+  while (i < text.length) {
+    if (text[i] !== "!" && text[i] !== "[") {
+      i += 1;
+      continue;
+    }
+
+    const parsed = parseMdLinkLikeAt(text, i);
+    if (!parsed) {
+      i += 1;
+      continue;
+    }
+
+    if (parsed.start > last) {
+      out.push({ kind: "text", s: text.slice(last, parsed.start) });
+    }
+
+    out.push({
+      kind: "mdlink",
+      isImage: parsed.isImage,
+      label: text.slice(parsed.labelStart, parsed.labelEnd),
+      addr: text.slice(parsed.addrStart, parsed.addrEnd),
+    });
+
+    i = parsed.end;
+    last = parsed.end;
+  }
+
+  if (last < text.length) {
+    out.push({ kind: "text", s: text.slice(last) });
+  }
+
+  return out;
+}
+
+function convertByMdInlineSegments(
+  text: string,
+  stats: Stats,
+  convertPlain: (s: string, stats: Stats) => string,
+): string {
+  const segs = splitMdInlineSegments(text);
+  const out: string[] = [];
+
+  for (const seg of segs) {
+    if (seg.kind === "text") {
+      out.push(convertPlain(seg.s, stats));
+      continue;
+    }
+
+    const label = convertPlain(seg.label, stats);
+    if (seg.isImage) out.push(`![${label}](${seg.addr})`);
+    else out.push(`[${label}](${seg.addr})`);
+  }
+
+  return out.join("");
 }
 
 /** ---------- Markdown bold symbol fix ---------- */
@@ -96,12 +238,6 @@ function isNonWordLikeForBold(ch: string): boolean {
   return !isWordLikeForBold(ch);
 }
 
-type BoldPair = {
-  leftOuter: string;
-  inner: string;
-  rightOuter: string;
-};
-
 function trimBoldInner(inner: string, stats: Stats): string {
   let out = inner;
 
@@ -120,56 +256,64 @@ function trimBoldInner(inner: string, stats: Stats): string {
   return out;
 }
 
-function normalizeBoldPair(pair: BoldPair, stats: Stats): string {
+function normalizeBoldPair(pair: BoldPair, stats: Stats): { leftPad: string; core: string; rightPad: string } {
   const inner = trimBoldInner(pair.inner, stats);
   const firstInner = inner[0] ?? "";
   const lastInner = inner[inner.length - 1] ?? "";
 
-  let leftPad = "";
-  let rightPad = "";
+  const needLeftPad =
+    !!firstInner &&
+    isNonWordLikeForBold(firstInner) &&
+    !isNonWordLikeForBold(pair.leftOuter);
 
-  if (firstInner && isNonWordLikeForBold(firstInner) && !isNonWordLikeForBold(pair.leftOuter)) {
-    leftPad = " ";
-    inc(stats, "md_bold_symbol_fix", 1);
-  }
+  const needRightPad =
+    !!lastInner &&
+    isNonWordLikeForBold(lastInner) &&
+    !isNonWordLikeForBold(pair.rightOuter);
 
-  if (lastInner && isNonWordLikeForBold(lastInner) && !isNonWordLikeForBold(pair.rightOuter)) {
-    rightPad = " ";
-    inc(stats, "md_bold_symbol_fix", 1);
-  }
+  if (needLeftPad) inc(stats, "md_bold_symbol_fix", 1);
+  if (needRightPad) inc(stats, "md_bold_symbol_fix", 1);
 
-  return leftPad + "**" + inner + "**" + rightPad;
+  return {
+    leftPad: needLeftPad ? " " : "",
+    core: `**${inner}**`,
+    rightPad: needRightPad ? " " : "",
+  };
 }
 
 function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
   if (!par || !par.includes("**")) return par;
 
   const out: string[] = [];
-  let i = 0;
+  let cursor = 0;
 
-  while (i < par.length) {
-    const open = par.indexOf("**", i);
+  while (cursor < par.length) {
+    const open = par.indexOf("**", cursor);
     if (open < 0) {
-      out.push(par.slice(i));
+      out.push(par.slice(cursor));
       break;
     }
-
-    out.push(par.slice(i, open));
 
     const close = par.indexOf("**", open + 2);
     if (close < 0) {
-      out.push(par.slice(open));
+      out.push(par.slice(cursor));
       break;
     }
 
+    const before = par.slice(cursor, open);
     const pair: BoldPair = {
       leftOuter: open > 0 ? par[open - 1] : "",
       inner: par.slice(open + 2, close),
       rightOuter: close + 2 < par.length ? par[close + 2] : "",
     };
 
-    out.push(normalizeBoldPair(pair, stats));
-    i = close + 2;
+    const normalized = normalizeBoldPair(pair, stats);
+    out.push(before);
+    out.push(normalized.leftPad);
+    out.push(normalized.core);
+    out.push(normalized.rightPad);
+
+    cursor = close + 2;
   }
 
   return out.join("");
@@ -254,9 +398,6 @@ function convertParensSemantic(text: string, stats: Stats): string {
 
 /** ---------- Token split helper ---------- */
 
-type SegPart = { kind: "text"; s: string } | { kind: "token"; s: string };
-type LocalSkip = { start: number; end: number; reason: string };
-
 function splitByTokens(par: string): SegPart[] {
   const parts: SegPart[] = [];
   let last = 0;
@@ -276,6 +417,8 @@ function splitByTokens(par: string): SegPart[] {
   return parts;
 }
 
+/** ---------- Quotes conversion with odd fallback ---------- */
+
 function collectPositions(
   seg: string,
   ch: string,
@@ -287,8 +430,6 @@ function collectPositions(
   }
   return out;
 }
-
-/** ---------- Quotes conversion with odd fallback ---------- */
 
 function collectDoubleQuoteCandidates(seg: string, gate: (pos: number) => boolean): number[] {
   return collectPositions(seg, `"`, gate);
@@ -471,7 +612,7 @@ function convertAsciiBracketsOddFallback(par: string): {
 
 /** ---------- Ellipsis / emphasis / dash / basic punctuation ---------- */
 
-function convertEllipsis(text: string, stats: Stats): string {
+function convertEllipsisPlain(text: string, stats: Stats): string {
   const snap = text;
   return text.replace(/\.{3,}/g, (m, offset) => {
     if (!shouldConvertAt(snap, Number(offset))) return m;
@@ -488,7 +629,7 @@ function convertEmphasisRun(run: string): string {
   return out;
 }
 
-function convertEmphasisPunct(text: string, stats: Stats): string {
+function convertEmphasisPunctPlain(text: string, stats: Stats): string {
   const snap = text;
 
   return text.replace(/[!?]{2,}/g, (m, offset) => {
@@ -506,7 +647,7 @@ function convertEmphasisPunct(text: string, stats: Stats): string {
   });
 }
 
-function convertDash(text: string, stats: Stats): string {
+function convertDashPlain(text: string, stats: Stats): string {
   return text.replace(/(?<!-)\-\-(?!-)/g, (m, offset) => {
     const idx = Number(offset);
     if (!shouldConvertAt(text, idx)) return m;
@@ -538,36 +679,43 @@ function isStructuralAsciiDot(text: string, idx: number): boolean {
   return false;
 }
 
-function convertBasic(text: string, stats: Stats): string {
-  for (const [k, v] of Object.entries(BASIC_MAP)) {
-    const snap = text;
-    text = replaceChar(text, k, (idx) => {
-      if (!shouldConvertAt(snap, idx)) return null;
-      inc(stats, `${k}->${v}`, 1);
-      return v;
-    });
-  }
+function convertBasicPlain(text: string, stats: Stats): string {
+  if (!text) return text;
 
-  {
-    const snap = text;
-    text = text.replace(/:(?![A-Za-z0-9_+\-]+:)/g, (m, offset) => {
-      const idx = Number(offset);
-      if (!shouldConvertAt(snap, idx)) return m;
-      inc(stats, ":->：", 1);
-      return "：";
-    });
-  }
+  text = text.replace(/[,:;?!]+/g, (m, offset) => {
+    const base = Number(offset);
+    let out = "";
 
-  {
-    const snap = text;
-    text = replaceChar(text, ".", (idx) => {
-      if (!isDotSentenceEndContext(snap, idx)) return null;
-      if (isStructuralAsciiDot(snap, idx)) return null;
-      if (!shouldConvertAt(snap, idx)) return null;
-      inc(stats, ".->。", 1);
-      return "。";
-    });
-  }
+    for (let i = 0; i < m.length; i++) {
+      const ch = m[i];
+      const idx = base + i;
+      const mapped = BASIC_MAP[ch];
+
+      if (!mapped) {
+        out += ch;
+        continue;
+      }
+
+      if (!shouldConvertAt(text, idx)) {
+        out += ch;
+        continue;
+      }
+
+      inc(stats, `${ch}->${mapped}`, 1);
+      out += mapped;
+    }
+
+    return out;
+  });
+
+  const snap = text;
+  text = replaceChar(text, ".", (idx) => {
+    if (!isDotSentenceEndContext(snap, idx)) return null;
+    if (isStructuralAsciiDot(snap, idx)) return null;
+    if (!shouldConvertAt(snap, idx)) return null;
+    inc(stats, ".->。", 1);
+    return "。";
+  });
 
   return text;
 }
