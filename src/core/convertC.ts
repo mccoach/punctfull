@@ -332,7 +332,24 @@ function splitByTokens(par: string): SegPart[] {
   return parts;
 }
 
-/** ---------- Quotes conversion with odd fallback ---------- */
+function splitLinesKeepEnds(s: string): Array<{ text: string; start: number }> {
+  const out: Array<{ text: string; start: number }> = [];
+  let start = 0;
+
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "\n") {
+      out.push({ text: s.slice(start, i + 1), start });
+      start = i + 1;
+    }
+  }
+
+  if (start < s.length) out.push({ text: s.slice(start), start });
+  if (!out.length) out.push({ text: "", start: 0 });
+
+  return out;
+}
+
+/** ---------- Quotes conversion with odd fallback (line-local) ---------- */
 
 function collectPositions(
   seg: string,
@@ -416,11 +433,12 @@ function applyAlternatingQuotes(
   }
 }
 
-function convertQuotesInParagraph(
-  par: string,
+function convertQuotesInLine(
+  line: string,
+  lineStart: number,
   stats: Stats,
 ): { text: string; localSkips: LocalSkip[] } {
-  const parts = splitByTokens(par);
+  const parts = splitByTokens(line);
   const localSkips: LocalSkip[] = [];
 
   function convertSegment(seg: string, segStart: number): string {
@@ -462,7 +480,7 @@ function convertQuotesInParagraph(
   }
 
   const out: string[] = [];
-  let cur = 0;
+  let cur = lineStart;
 
   for (const p of parts) {
     if (p.kind === "token") {
@@ -477,12 +495,28 @@ function convertQuotesInParagraph(
   return { text: out.join(""), localSkips };
 }
 
-/** ---------- ASCII brackets odd fallback (mark only) ---------- */
+function convertQuotesInParagraph(
+  par: string,
+  stats: Stats,
+): { text: string; localSkips: LocalSkip[] } {
+  const lines = splitLinesKeepEnds(par);
+  const out: string[] = [];
+  const localSkips: LocalSkip[] = [];
+
+  for (const line of lines) {
+    const r = convertQuotesInLine(line.text, line.start, stats);
+    out.push(r.text);
+    localSkips.push(...r.localSkips);
+  }
+
+  return { text: out.join(""), localSkips };
+}
+
+/** ---------- ASCII brackets odd fallback (line-local, mark only) ---------- */
 
 function convertAsciiBracketsOddFallback(par: string): {
   localSkips: LocalSkip[];
 } {
-  const parts = splitByTokens(par);
   const localSkips: LocalSkip[] = [];
 
   const pairs: Array<[string, string, string]> = [
@@ -491,35 +525,44 @@ function convertAsciiBracketsOddFallback(par: string): {
     ["{", "}", "奇数回退：花括号不成对，跳过该符号"],
   ];
 
-  function scanSeg(seg: string, segStart: number) {
-    const gate = (pos: number) => shouldConvertAt(seg, pos);
+  function scanLine(line: string, lineStart: number) {
+    const parts = splitByTokens(line);
+    let cur = lineStart;
 
-    for (const [left, right, reason] of pairs) {
-      const cands: number[] = [];
-      cands.push(...collectPositions(seg, left, gate));
-      cands.push(...collectPositions(seg, right, gate));
-      cands.sort((a, b) => a - b);
+    for (const p of parts) {
+      if (p.kind === "token") {
+        cur += p.s.length;
+        continue;
+      }
 
-      if (cands.length && cands.length % 2 === 1) {
-        for (const p of cands) {
-          localSkips.push({
-            start: segStart + p,
-            end: segStart + p + 1,
-            reason,
-          });
+      const seg = p.s;
+      const segStart = cur;
+      const gate = (pos: number) => shouldConvertAt(seg, pos);
+
+      for (const [left, right, reason] of pairs) {
+        const cands: number[] = [];
+        cands.push(...collectPositions(seg, left, gate));
+        cands.push(...collectPositions(seg, right, gate));
+        cands.sort((a, b) => a - b);
+
+        if (cands.length && cands.length % 2 === 1) {
+          for (const p of cands) {
+            localSkips.push({
+              start: segStart + p,
+              end: segStart + p + 1,
+              reason,
+            });
+          }
         }
       }
+
+      cur += p.s.length;
     }
   }
 
-  let cur = 0;
-  for (const p of parts) {
-    if (p.kind === "token") {
-      cur += p.s.length;
-    } else {
-      scanSeg(p.s, cur);
-      cur += p.s.length;
-    }
+  const lines = splitLinesKeepEnds(par);
+  for (const line of lines) {
+    scanLine(line.text, line.start);
   }
 
   return { localSkips };
