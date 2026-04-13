@@ -215,8 +215,22 @@ function applyBoldPairFixes(line: string, fixes: BoldPairFix[]): string {
   return out.join("");
 }
 
+/** Unescape paired \*\* → ** so the normal bold fix can process them */
+function unescapePairedBoldMarkers(par: string, stats: Stats): string {
+  if (!par.includes("\\*")) return par;
+  return par.replace(/\\\*\\\*(.+?)\\\*\\\*/g, (_m, inner) => {
+    inc(stats, "md_bold_unescape", 1);
+    return `**${inner}**`;
+  });
+}
+
 function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
-  if (!par || !par.includes("**")) return par;
+  if (!par) return par;
+
+  // First: unescape paired \*\* → **, then continue with normal ** processing
+  par = unescapePairedBoldMarkers(par, stats);
+
+  if (!par.includes("**")) return par;
 
   const lines = par.match(RE_LINE_WITH_END) ?? [par];
   const out: string[] = [];

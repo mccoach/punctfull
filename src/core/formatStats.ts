@@ -20,6 +20,7 @@ const CONVERSION_ITEMS: Array<{ key: string; label: string }> = [
   { key: "question_runs", label: "问号连写（???→？？？）" },
   { key: "?!", label: "组合标点（?!→？！）" },
   { key: "!?", label: "组合标点（!?→！？）" },
+  { key: "md_bold_unescape", label: "加粗符号反转义（\\*\\*→**）" },
   { key: "md_bold_symbol_fix", label: "Markdown 加粗符号修复" }
 ];
 
