@@ -68,6 +68,13 @@ const OPTION_ITEMS = [
     tip:
       "修复 Markdown 加粗符号 ** 的兼容性问题：\n1. 去掉 **内容** 两侧内部的非法空格；\n2. 当左 ** 左侧紧邻字母/数字/汉字，且加粗内容首字符是符号时，在左 ** 前补一个空格。\n3. 当右 ** 左侧紧邻非文字，而右侧紧邻文字时，在右 ** 后补一个空格。\n\n仅处理正文区，代码/链接/表格/公式等保护区不会动。",
   },
+  {
+    id: "opt_backslash",
+    checked: true,
+    label: "转义符\\",
+    tip:
+      "删除正文区中多余的 Markdown 转义反斜杠 \\。\n\n会保留行首用于防止标题、引用、列表触发的必要转义；代码、公式、HTML、表格、链接、URL、路径等保护区不处理。",
+  },
 ] as const;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string) {
@@ -100,6 +107,7 @@ function getOptionsFromUI(root: HTMLElement): Options {
     protect_b_fragments: true,
     fix_paired_symbols: q("#opt_fixpairs").checked,
     fix_md_bold_symbols: q("#opt_boldsym").checked,
+    remove_md_backslash_escapes: q("#opt_backslash").checked,
   };
 }
 

@@ -232,12 +232,63 @@ function protectCommonTechnicalFragments(text: string, stats: Stats, store: Toke
   return text;
 }
 
+function isEscapedMdLineStarter(line: string, idx: number): boolean {
+  if (line[idx] !== "\\") return false;
+
+  let i = 0;
+  while (i < idx && (line[i] === " " || line[i] === "\t")) i += 1;
+  if (i !== idx) return false;
+
+  const next = line[idx + 1] ?? "";
+  if (next === "#" || next === ">" || next === "-" || next === "*" || next === "+") {
+    return true;
+  }
+
+  let j = idx + 1;
+  if (!/[0-9]/.test(line[j] ?? "")) return false;
+  while (/[0-9]/.test(line[j] ?? "")) j += 1;
+  if (line[j] !== ".") return false;
+
+  const afterDot = line[j + 1] ?? "";
+  return afterDot === "" || afterDot === " " || afterDot === "\t";
+}
+
+function protectEscapedMdLineStarters(text: string, stats: Stats, store: TokenStore): string {
+  const lines = text.match(/.*(?:\r?\n|$)/g) ?? [text];
+  const out: string[] = [];
+
+  for (const line of lines) {
+    if (!line) continue;
+
+    let i = 0;
+    let done = false;
+
+    while (i < line.length) {
+      if (!isEscapedMdLineStarter(line, i)) {
+        i += 1;
+        continue;
+      }
+
+      const token = store.put("\\");
+      out.push(line.slice(0, i), token, line.slice(i + 1));
+      stats.protected_B_fragments += 1;
+      done = true;
+      break;
+    }
+
+    if (!done) out.push(line);
+  }
+
+  return out.join("");
+}
+
 export function protectB(text: string, stats: Stats): { text: string; store: TokenStore } {
   const store = new TokenStore("B");
   if (!text) return { text, store };
 
   text = protectMarkdownLinksAndImages(text, stats, store);
   text = protectCommonTechnicalFragments(text, stats, store);
+  text = protectEscapedMdLineStarters(text, stats, store);
 
   return { text, store };
 }

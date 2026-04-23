@@ -34,6 +34,10 @@ export function convertC(text: string, options: Options, stats: Stats): string {
 
     let par = part;
 
+    if (options.remove_md_backslash_escapes) {
+      par = convertTextByTokenSegments(par, stats, removeMarkdownBackslashEscapesPlain);
+    }
+
     if (options.convert_quotes) {
       const r = convertQuotesInParagraph(par, stats);
       par = r.text;
@@ -99,6 +103,21 @@ function convertTextByTokenSegments(
   }
 
   return out.join("");
+}
+
+/** ---------- Markdown backslash escapes cleanup ---------- */
+
+function removeMarkdownBackslashEscapesPlain(text: string, stats: Stats): string {
+  if (!text || !text.includes("\\")) return text;
+
+  let removed = 0;
+  const out = text.replace(/\\/g, () => {
+    removed += 1;
+    return "";
+  });
+
+  if (removed) inc(stats, "md_backslash_escapes_removed", removed);
+  return out;
 }
 
 /** ---------- Markdown bold symbol fix ---------- */
@@ -215,21 +234,8 @@ function applyBoldPairFixes(line: string, fixes: BoldPairFix[]): string {
   return out.join("");
 }
 
-/** Unescape paired \*\* → ** so the normal bold fix can process them */
-function unescapePairedBoldMarkers(par: string, stats: Stats): string {
-  if (!par.includes("\\*")) return par;
-  return par.replace(/\\\*\\\*(.+?)\\\*\\\*/g, (_m, inner) => {
-    inc(stats, "md_bold_unescape", 1);
-    return `**${inner}**`;
-  });
-}
-
 function fixMarkdownBoldSymbols(par: string, stats: Stats): string {
   if (!par) return par;
-
-  // First: unescape paired \*\* → **, then continue with normal ** processing
-  par = unescapePairedBoldMarkers(par, stats);
-
   if (!par.includes("**")) return par;
 
   const lines = par.match(RE_LINE_WITH_END) ?? [par];
