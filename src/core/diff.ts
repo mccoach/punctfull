@@ -1,4 +1,5 @@
 import DiffMatchPatch from "diff-match-patch";
+import type { MarkRange } from "./types";
 
 export type RangePair = { start: number; end: number };
 
@@ -43,9 +44,32 @@ export function computeChangedRanges(a: string, b: string): RangePair[] {
       bPos += len;
       continue;
     }
-
-    // deletion from a: no advance on b side, and no non-empty range to mark
   }
 
   return mergeRanges(ranges);
+}
+
+function intersectTip(marks: MarkRange[], start: number, end: number): string {
+  for (const m of marks) {
+    if (m.end <= start || m.start >= end) continue;
+    return m.tip;
+  }
+  return "已修改";
+}
+
+export function computeChangedMarks(a: string, b: string, outMarks: MarkRange[]) {
+  const rightRanges = computeChangedRanges(a, b).map((r) => ({
+    ...r,
+    tip: intersectTip(outMarks, r.start, r.end),
+  }));
+
+  const leftRanges = computeChangedRanges(b, a).map((r) => ({
+    ...r,
+    tip: "原文对应位置",
+  }));
+
+  return {
+    rightMarks: rightRanges,
+    leftMarks: leftRanges,
+  };
 }

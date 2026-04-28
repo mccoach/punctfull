@@ -6,9 +6,10 @@
 
   --editor-bg: #ffffff;
 
-  --hl-out: #ffff00;
-  --hl-in: #87ceeb;
-  --skip: #aaaaaa;
+  --hl-change-left: #8fd3ff;
+  --hl-change-right: #fff176;
+  --hl-skip-negative: #ffb3b3;
+  --hl-skip-uncertain: #c7c7c7;
 
   --btn-bg: #ffffff;
   --btn-fg: #222;
@@ -22,9 +23,10 @@
 
   --editor-bg: #1e1e1e;
 
-  --hl-out: #8b7355;
-  --hl-in: #2a7da2;
-  --skip: #999999;
+  --hl-change-left: #2a7da2;
+  --hl-change-right: #8b7355;
+  --hl-skip-negative: #7f3c3c;
+  --hl-skip-uncertain: #666666;
 
   --btn-bg: #2a2a2a;
   --btn-fg: #e6e6e6;
@@ -45,8 +47,6 @@ html, body {
   display: flex;
   flex-direction: column;
 }
-
-/* ===== Top bar: left actions / options center / right actions ===== */
 
 .topbar {
   padding: 6px 12px;
@@ -78,8 +78,6 @@ html, body {
   flex-shrink: 0;
 }
 
-/* ===== Options fieldset ===== */
-
 .options-box {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -109,8 +107,6 @@ html, body {
   margin: 0;
 }
 
-/* ===== Buttons sizing by importance ===== */
-
 button {
   padding: 6px 10px;
   border: 1px solid var(--border);
@@ -139,8 +135,6 @@ button.btn-small {
   font-size: 12px;
 }
 
-/* ===== Theme selector (small, right corner) ===== */
-
 .theme-group {
   display: flex;
   align-items: center;
@@ -162,8 +156,6 @@ button.btn-small {
   font-size: 11px;
 }
 
-/* ===== Status bar ===== */
-
 .status-bar {
   padding: 4px 12px;
   border-bottom: 1px solid var(--border);
@@ -173,8 +165,6 @@ button.btn-small {
   min-height: 26px;
   line-height: 18px;
 }
-
-/* ===== Main editor area ===== */
 
 .main {
   flex: 1;
@@ -206,8 +196,6 @@ button.btn-small {
   min-height: 0;
 }
 
-/* ===== Footer ===== */
-
 .footer {
   padding: 8px 12px;
   border-top: 1px solid var(--border);
@@ -215,8 +203,6 @@ button.btn-small {
   font-size: 12px;
   opacity: 0.85;
 }
-
-/* ===== Legacy support (kept for non-layout code) ===== */
 
 label {
   font-size: 13px;
@@ -240,13 +226,15 @@ select {
   border-radius: 6px;
 }
 
-/* Monaco decorations */
-.monaco-editor .punctfull-diff-out {
-  background: var(--hl-out);
-}
 .monaco-editor .punctfull-diff-in {
-  background: var(--hl-in);
+  background: var(--hl-change-left);
 }
-.monaco-editor .punctfull-skip {
-  background: var(--skip);
+.monaco-editor .punctfull-diff-out {
+  background: var(--hl-change-right);
+}
+.monaco-editor .punctfull-skip-negative {
+  background: var(--hl-skip-negative);
+}
+.monaco-editor .punctfull-skip-uncertain {
+  background: var(--hl-skip-uncertain);
 }
