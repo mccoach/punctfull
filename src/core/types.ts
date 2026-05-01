@@ -18,7 +18,6 @@ export type SkipReasonKey =
   | "paren_context_negative"
   | "paren_context_unknown"
   | "basic_non_chinese"
-  | "basic_invalid_norm"
   | "basic_context_unknown";
 
 export type Range = {

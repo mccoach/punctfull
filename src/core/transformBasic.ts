@@ -135,7 +135,7 @@ function evaluateRun(line: string, start: number, end: number, compact: string, 
     return {
       ok: false,
       kind: "uncertain",
-      key: "basic_invalid_norm",
+      key: "basic_context_unknown",
       reason: "跳过：不符合中文标点符号用法规范",
     };
   }
@@ -143,6 +143,7 @@ function evaluateRun(line: string, start: number, end: number, compact: string, 
   const contextDecision = decideBasicContext(line, start, end);
   const direction = getBasicSeedDirection(line, start, end);
 
+  // 上下文明确为“非中文” → 直接判非
   if (contextDecision === "negative" || direction === "none") {
     return {
       ok: false,
@@ -152,34 +153,28 @@ function evaluateRun(line: string, start: number, end: number, compact: string, 
     };
   }
 
-  if (contextDecision === "unknown") {
-    return {
-      ok: false,
-      kind: "uncertain",
-      key: "basic_context_unknown",
-      reason: "跳过：无法判定中文语境",
-    };
-  }
-
-  for (let step = 1; step <= compact.length; step++) {
-    if (direction === "ltr") {
+  // 上下文已判为中文（至少有一侧能判定），但需验证白名单
+  if (direction === "ltr") {
+    for (let step = 1; step <= compact.length; step++) {
       const fragment = buildLtrFragment(compact, step);
       if (!isBasicRunProgressValid(kind, fragment)) {
         return {
           ok: false,
-          kind: "uncertain",
-          key: "basic_invalid_norm",
-          reason: "跳过：不符合中文标点符号用法规范",
+          kind: "negative",
+          key: "basic_non_chinese",
+          reason: "跳过：非中文标点符号（组合不符合规范）",
         };
       }
-    } else {
+    }
+  } else if (direction === "rtl") {
+    for (let step = 1; step <= compact.length; step++) {
       const fragment = buildRtlResultFragment(kind, compact, step);
       if (!isRtlResultFragmentValid(kind, fragment)) {
         return {
           ok: false,
-          kind: "uncertain",
-          key: "basic_invalid_norm",
-          reason: "跳过：不符合中文标点符号用法规范",
+          kind: "negative",
+          key: "basic_non_chinese",
+          reason: "跳过：非中文标点符号（组合不符合规范）",
         };
       }
     }
@@ -188,9 +183,9 @@ function evaluateRun(line: string, start: number, end: number, compact: string, 
   if (!isBasicRunFinalValid(kind, compact)) {
     return {
       ok: false,
-      kind: "uncertain",
-      key: "basic_invalid_norm",
-      reason: "跳过：不符合中文标点符号用法规范",
+      kind: "negative",
+      key: "basic_non_chinese",
+      reason: "跳过：非中文标点符号（最终组合不符合规范）",
     };
   }
 

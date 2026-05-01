@@ -35,7 +35,6 @@ const SKIP_REASON_LABELS: Record<string, string> = {
   paren_context_unknown: "括号无法判定",
 
   basic_non_chinese: "基础标点判非",
-  basic_invalid_norm: "基础标点不合规范",
   basic_context_unknown: "基础标点无法判定",
 };
 

@@ -69,22 +69,30 @@ export function getEffectiveCharRight(text: string, idx: number): { ch: string; 
   return null;
 }
 
-export function decideByChar(ch: string, side: "left" | "right"): SideDecision {
+/**
+ * 判定一个字符对中文语境的倾向性。
+ * 规则：只要该字符本身能明确指示“是中文”或“不是中文”，就直接给出结论。
+ * 汉字、中文标点种子 → positive
+ * 强非中文符号（运算符等）、英文字母/数字 → negative
+ * 其他无法判定的字符 → unknown
+ */
+export function decideByChar(ch: string): SideDecision {
   if (!ch) return "unknown";
   if (isChineseContextSeed(ch)) return "positive";
   if (isStrongNonChineseChar(ch)) return "negative";
-  if (isAsciiLetterOrDigit(ch)) return side === "right" ? "negative" : "unknown";
+  // 英文字母、数字直接认定为非中文语境
+  if (isAsciiLetterOrDigit(ch)) return "negative";
   if (isAmbiguousMappedChar(ch)) return "unknown";
   return "unknown";
 }
 
 export function decideBasicContext(text: string, start: number, end: number): SideDecision {
   const left = getEffectiveCharLeft(text, start);
-  const leftDecision = decideByChar(left?.ch ?? "", "left");
+  const leftDecision = decideByChar(left?.ch ?? "");
   if (leftDecision !== "unknown") return leftDecision;
 
   const right = getEffectiveCharRight(text, end);
-  const rightDecision = decideByChar(right?.ch ?? "", "right");
+  const rightDecision = decideByChar(right?.ch ?? "");
   if (rightDecision !== "unknown") return rightDecision;
 
   return "unknown";
@@ -92,12 +100,12 @@ export function decideBasicContext(text: string, start: number, end: number): Si
 
 export function getBasicSeedDirection(text: string, start: number, end: number): "ltr" | "rtl" | "none" {
   const left = getEffectiveCharLeft(text, start);
-  const leftDecision = decideByChar(left?.ch ?? "", "left");
+  const leftDecision = decideByChar(left?.ch ?? "");
   if (leftDecision === "positive") return "ltr";
   if (leftDecision === "negative") return "none";
 
   const right = getEffectiveCharRight(text, end);
-  const rightDecision = decideByChar(right?.ch ?? "", "right");
+  const rightDecision = decideByChar(right?.ch ?? "");
   if (rightDecision === "positive") return "rtl";
   if (rightDecision === "negative") return "none";
 
@@ -111,15 +119,15 @@ export function decidePairContext(
   rightStart: number,
   rightEnd: number,
 ): { decision: SideDecision; point: PairCheckPointName | "" } {
-  const checks: Array<{ name: PairCheckPointName; ch: string; side: "left" | "right" }> = [
-    { name: "left-left", ch: getEffectiveCharLeft(text, leftStart)?.ch ?? "", side: "left" },
-    { name: "left-right", ch: getEffectiveCharRight(text, leftEnd)?.ch ?? "", side: "right" },
-    { name: "right-left", ch: getEffectiveCharLeft(text, rightStart)?.ch ?? "", side: "left" },
-    { name: "right-right", ch: getEffectiveCharRight(text, rightEnd)?.ch ?? "", side: "right" },
+  const checks: Array<{ name: PairCheckPointName; ch: string }> = [
+    { name: "left-left", ch: getEffectiveCharLeft(text, leftStart)?.ch ?? "" },
+    { name: "left-right", ch: getEffectiveCharRight(text, leftEnd)?.ch ?? "" },
+    { name: "right-left", ch: getEffectiveCharLeft(text, rightStart)?.ch ?? "" },
+    { name: "right-right", ch: getEffectiveCharRight(text, rightEnd)?.ch ?? "" },
   ];
 
   for (const item of checks) {
-    const d = decideByChar(item.ch, item.side);
+    const d = decideByChar(item.ch);
     if (d !== "unknown") {
       return { decision: d, point: item.name };
     }
